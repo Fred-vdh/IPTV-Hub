@@ -44,12 +44,12 @@
     <td align="center" width="50%">
       <img src="docs/screenshots/live.png" alt="Télévision en Direct" width="100%">
       <br>
-      <b>📺 TV en Direct : lecteur libmpv, chaînes et guide en temps réel</b>
+      <b>📺 TV en Direct : diffusion active, lecteur matériel libmpv et guide en temps réel</b>
     </td>
     <td align="center" width="50%">
       <img src="docs/screenshots/epg.png" alt="Guide TV Chronologique" width="100%">
       <br>
-      <b>📅 Guide Électronique des Programmes (EPG Grid)</b>
+      <b>📅 Guide Électronique des Programmes (Grille EPG interactive)</b>
     </td>
   </tr>
   <tr>
@@ -61,18 +61,22 @@
     <td align="center" width="50%">
       <img src="docs/screenshots/series.png" alt="Séries TV" width="100%">
       <br>
-      <b>🍿 Séries TV : navigation par groupe et fiches détaillées</b>
+      <b>🍿 Séries TV : navigation par genre et suivi de visionnage</b>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/series_detail.png" alt="Détail d'une série et épisodes" width="100%">
+      <br>
+      <b>📑 Fiche détaillée d'une série : saisons, vignettes 16:9 et barres d'avancement</b>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/artist.png" alt="Fiche Artiste et Filmographie" width="100%">
+      <br>
+      <b>🌟 Fiche Artiste : biographie TMDB et filmographie disponible dans la playlist</b>
     </td>
   </tr>
 </table>
-
-<br>
-
-<p align="center">
-  <img src="docs/screenshots/series_detail.png" alt="Détail d'une série et épisodes" width="95%">
-  <br>
-  <em>Fiche détaillée d'une série : sélecteur de saisons, épisodes et badges de progression de visionnage</em>
-</p>
 
 ---
 
@@ -98,10 +102,10 @@ Vous pouvez télécharger la version adaptée à votre système directement depu
 - **Grille EPG interactive** : Vue chronologique complète avec curseur d'avancement horaire.
 
 ### 🎬 Vidéo à la Demande (Films & Séries)
-- **Métadonnées et enrichissement TMDB** : Récupération automatique des affiches officielles, synopsis, casting, notes et dates de sortie.
-- **Filmographie des artistes** : Cliquez sur un acteur ou un réalisateur pour explorer l'ensemble de ses films disponibles dans votre playlist !
-- **Gestion intelligente des séries** : Sélecteur clair des saisons et épisodes, reprise automatique de lecture et enchaînement automatique de l'épisode suivant (*Auto-Play*).
-- **Indicateurs de progression** : Suivi précis du temps visionné par épisode et par film.
+- **Métadonnées et enrichissement TMDB** : Récupération automatique des affiches officielles, synopsis, casting complet, notes et dates de sortie.
+- **Recherche & Filmographie par artiste** : Effectuez des recherches ciblées par acteur ou réalisateur (ou cliquez sur n'importe quel artiste dans une fiche) pour découvrir sa biographie complète et retrouver tous ses films et séries disponibles dans votre playlist !
+- **Gestion intelligente des séries** : Sélecteur clair des saisons et épisodes, affichage des vignettes 16:9, reprise automatique de lecture et enchaînement automatique de l'épisode suivant (*Auto-Play*).
+- **Indicateurs de progression visuelle** : Suivi précis du temps visionné sous chaque épisode avec barres d'avancement et pastilles de complétion.
 
 ### ⏪ Replay TV (Catchup)
 - Visionnage en différé des programmes passés jusqu'à 7 jours en arrière sur les chaînes compatibles (Xtream Catchup & Flussonic).
@@ -182,6 +186,14 @@ pip install -r requirements.txt
 # 4. Lancer l'application
 python main.py
 ```
+
+---
+
+## ℹ️ Note importante & Avertissement bienveillant
+
+> 🍿 **Un lecteur 100% neutre, à votre service !**  
+> **IPTV Hub** est exclusivement un **lecteur multimédia** (*player* logiciel open-source). L'application **ne fournit, n'héberge et ne distribue aucun contenu, aucun flux vidéo, aucun média ni aucune liste de chaînes**.  
+> Vous êtes entièrement libre d'utiliser les listes de lecture (fichiers M3U ou comptes Xtream) légalement mises à votre disposition par vos fournisseurs légitimes. Installez, ajoutez votre propre playlist, et profitez simplement de la meilleure expérience de visionnage sur votre PC !
 
 ---
 
