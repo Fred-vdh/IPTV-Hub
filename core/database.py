@@ -2186,16 +2186,19 @@ class Database:
 
                 if is_completed:
                     pct = 0
-                    rem_str = "Épisode suivant disponible"
+                    rem_sec = 0
+                    from core.i18n import tr
+                    rem_str = tr("Épisode suivant disponible")
                 else:
                     pct = min(99, max(1, int((pos / dur) * 100)))
                     rem_sec = max(0, int(dur - pos))
                     rem_h = rem_sec // 3600
                     rem_m = (rem_sec % 3600) // 60
+                    from core.i18n import tr
                     if rem_h > 0:
-                        rem_str = f"Il reste {rem_h} h {rem_m:02d} min"
+                        rem_str = tr("Il reste {hours} h {mins:02d} min", hours=rem_h, mins=rem_m)
                     else:
-                        rem_str = f"Il reste {max(1, rem_m)} min"
+                        rem_str = tr("Il reste {mins} min", mins=max(1, rem_m))
 
                 episode_text = ""
 
@@ -2304,6 +2307,7 @@ class Database:
                     "episode_text": episode_text,
                     "position": 0.0 if is_completed else pos,
                     "duration": dur,
+                    "remaining_seconds": rem_sec,
                     "remaining_str": rem_str,
                     "percentage": pct,
                     "is_completed": is_completed,

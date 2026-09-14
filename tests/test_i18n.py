@@ -110,6 +110,126 @@ class TestI18n(unittest.TestCase):
                 except Exception:
                     pass
 
+    def test_new_translations_hero_and_cards(self):
+        """Vérifie la traduction des éléments du bandeau hero, des cartes et de la barre de titre."""
+        self.i18n.set_language("fr")
+        self.assertEqual(tr("Liste :"), "Liste :")
+        self.assertEqual(tr("Ma liste de lecture"), "Ma liste de lecture")
+        self.assertEqual(tr("ma liste de lecture"), "ma liste de lecture")
+        self.assertEqual(tr("Film"), "Film")
+        self.assertEqual(tr("Série"), "Série")
+        self.assertEqual(tr("Reprendre l'épisode"), "Reprendre l'épisode")
+        self.assertEqual(tr("Il reste {mins} min", mins=34), "Il reste 34 min")
+        self.assertEqual(tr("{pct}% regardé", pct=29), "29 % regardé")
+
+        self.i18n.set_language("en")
+        self.assertEqual(tr("Liste :"), "Playlist:")
+        self.assertEqual(tr("Ma liste de lecture"), "My playlist")
+        self.assertEqual(tr("ma liste de lecture"), "my playlist")
+        self.assertEqual(tr("Film"), "Movie")
+        self.assertEqual(tr("Série"), "Series")
+        self.assertEqual(tr("Reprendre l'épisode"), "Resume episode")
+        self.assertEqual(tr("Il reste {mins} min", mins=34), "34 min left")
+        self.assertEqual(tr("{pct}% regardé", pct=29), "29% watched")
+        self.assertEqual(tr("Reprendre la lecture"), "Continue Watching")
+        self.assertEqual(tr("TV en direct récemment regardée"), "Recently watched live TV")
+        self.assertEqual(tr("Films & Séries favoris"), "Favorite movies & series")
+
+    def test_format_locale_date(self):
+        """Vérifie le formatage localisé des dates (FR / EN)."""
+        from datetime import datetime
+        from core.i18n import format_locale_date
+        test_dt = datetime(2026, 9, 14, 22, 30)
+
+        self.i18n.set_language("fr")
+        self.assertEqual(format_locale_date(test_dt, "short"), "14/09/2026")
+        self.assertEqual(format_locale_date(test_dt, "friendly"), "14 sept., 22:30")
+
+        self.i18n.set_language("en")
+        self.assertEqual(format_locale_date(test_dt, "short"), "09/14/2026")
+        self.assertEqual(format_locale_date(test_dt, "friendly"), "Sep 14, 22:30")
+
+    def test_widgets_hot_retranslation(self):
+        """Vérifie que les composants graphiques se mettent à jour automatiquement lors d'un changement de langue."""
+        from ui.widgets.custom_titlebar import CustomTitleBar
+        from ui.widgets.favorites_view import FavoritesView
+        from ui.widgets.recently_watched_view import RecentlyWatchedView
+        from ui.widgets.dashboard_view import DashboardView
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            temp_db = f.name
+        try:
+            db = Database(temp_db)
+
+            # 1. CustomTitleBar
+            self.i18n.set_language("fr")
+            tb = CustomTitleBar()
+            self.assertEqual(tb.pl_label.text(), "Liste :")
+            self.i18n.set_language("en")
+            self.assertEqual(tb.pl_label.text(), "Playlist:")
+
+            # 2. FavoritesView
+            self.i18n.set_language("fr")
+            fav = FavoritesView(db)
+            self.assertEqual(fav.title_label.text(), "Favoris")
+            self.assertEqual(fav.btn_movies.text(), "Films")
+            self.assertEqual(fav.btn_series.text(), "Séries")
+            self.assertEqual(fav.btn_live.text(), "TV en direct")
+            self.assertIn("Cette liste de lecture", fav.btn_this_playlist.text())
+            self.assertIn("Toutes les listes de lecture", fav.btn_all_playlists.text())
+
+            self.i18n.set_language("en")
+            self.assertEqual(fav.title_label.text(), "Favorites")
+            self.assertEqual(fav.btn_movies.text(), "Movies")
+            self.assertEqual(fav.btn_series.text(), "Series")
+            self.assertEqual(fav.btn_live.text(), "Live TV")
+            self.assertIn("This playlist", fav.btn_this_playlist.text())
+            self.assertIn("All playlists", fav.btn_all_playlists.text())
+
+            # 3. RecentlyWatchedView
+            self.i18n.set_language("fr")
+            hist = RecentlyWatchedView(db)
+            self.assertEqual(hist.title_label.text(), "Récemment regardés")
+            self.assertEqual(hist.btn_all.text(), "Tous")
+            self.assertEqual(hist.btn_movies.text(), "Films")
+            self.assertEqual(hist.btn_series.text(), "Séries")
+            self.assertEqual(hist.btn_live.text(), "TV en direct")
+            self.assertIn("Cette liste de lecture", hist.btn_this_playlist.text())
+            self.assertIn("Toutes les listes de lecture", hist.btn_all_playlists.text())
+
+            self.i18n.set_language("en")
+            self.assertEqual(hist.title_label.text(), "Recently Watched")
+            self.assertEqual(hist.btn_all.text(), "All")
+            self.assertEqual(hist.btn_movies.text(), "Movies")
+            self.assertEqual(hist.btn_series.text(), "Series")
+            self.assertEqual(hist.btn_live.text(), "Live TV")
+            self.assertIn("This playlist", hist.btn_this_playlist.text())
+            self.assertIn("All playlists", hist.btn_all_playlists.text())
+
+            # 4. DashboardView
+            self.i18n.set_language("fr")
+            dash = DashboardView(db)
+            dash.refresh_view()
+            self.assertEqual(dash.sec_continue.title_label.text(), "Reprendre la lecture")
+            self.assertEqual(dash.sec_recent_live.title_label.text(), "TV en direct récemment regardée")
+            self.assertEqual(dash.sec_favs.title_label.text(), "Films & Séries favoris")
+            self.assertEqual(dash.sec_recents.title_label.text(), "Récemment ajoutés sur la liste")
+
+            self.i18n.set_language("en")
+            self.assertEqual(dash.sec_continue.title_label.text(), "Continue Watching")
+            self.assertEqual(dash.sec_recent_live.title_label.text(), "Recently watched live TV")
+            self.assertEqual(dash.sec_favs.title_label.text(), "Favorite movies & series")
+            self.assertEqual(dash.sec_recents.title_label.text(), "Recently added on the playlist")
+
+        finally:
+            self.i18n.set_language("fr")
+            if os.path.exists(temp_db):
+                try:
+                    os.unlink(temp_db)
+                except Exception:
+                    pass
+
 
 if __name__ == "__main__":
     unittest.main()
+

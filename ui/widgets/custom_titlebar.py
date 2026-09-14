@@ -30,8 +30,11 @@ class CustomTitleBar(QWidget):
         self._drag_pos: Optional[QPoint] = None
 
         self._init_ui()
+        from core.i18n import I18nManager
+        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
 
     def _init_ui(self):
+        from core.i18n import tr
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 0, 0, 0)
         layout.setSpacing(10)
@@ -59,7 +62,7 @@ class CustomTitleBar(QWidget):
         layout.addWidget(sep_v)
 
         # Menu déroulant des listes de lecture
-        self.pl_label = QLabel("Liste :")
+        self.pl_label = QLabel(tr("Liste :"))
         self.pl_label.setStyleSheet("color: #94a3b8; font-weight: 600; font-size: 12px;")
         layout.addWidget(self.pl_label)
 

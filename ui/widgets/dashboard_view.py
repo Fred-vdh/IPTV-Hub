@@ -393,41 +393,52 @@ class HeroBannerWidget(QFrame):
 
         is_replay = ch.stream_type == "replay" or "/timeshift/" in (ch.stream_url or "").lower()
         if ch.stream_type == "series":
-            media_type = "Série"
+            media_type = tr("Série")
         elif is_replay:
-            media_type = "Replay"
+            media_type = tr("Replay")
             if not q_tag:
                 q_tag = "REPLAY"
         else:
-            media_type = "Film"
+            media_type = tr("Film")
 
-        pl_name = item.get("playlist_name", "Playlist")
+        raw_pl_name = item.get("playlist_name", "Playlist")
+        pl_name = tr(raw_pl_name)
         pl_type = item.get("playlist_type", "Xtream")
         self.meta_label.setText(f"{pl_name} · {pl_type} · {media_type}")
 
         # Temps & pourcentage
-        rem_str = item.get("remaining_str", "")
+        rem_sec = item.get("remaining_seconds")
+        if rem_sec is None:
+            rem_sec = max(0, int(self.duration - self.position))
+        rem_h = int(rem_sec) // 3600
+        rem_m = (int(rem_sec) % 3600) // 60
+        if rem_h > 0:
+            rem_str = tr("Il reste {hours} h {mins:02d} min", hours=rem_h, mins=rem_m)
+        else:
+            rem_str = tr("Il reste {mins} min", mins=max(1, rem_m))
+
         pct = item.get("percentage", 0)
+        pct_watched = tr("{pct}% regardé", pct=pct)
         ep_text = item.get("episode_text", "")
         is_completed = item.get("is_completed", False)
 
         if ch.stream_type == "series":
             if is_completed:
                 if ep_text:
-                    self.status_label.setText(f"{ep_text}  ·  Épisode suivant disponible")
-                    self.btn_resume.setText("  Lancer l'épisode suivant")
+                    self.status_label.setText(f"{ep_text}  ·  " + tr("Épisode suivant disponible"))
+                    self.btn_resume.setText("  " + tr("Lancer l'épisode suivant"))
                 else:
-                    self.status_label.setText("Série à reprendre")
-                    self.btn_resume.setText("  Voir la série")
+                    self.status_label.setText(tr("Série à reprendre"))
+                    self.btn_resume.setText("  " + tr("Voir la série"))
             else:
-                self.status_label.setText(f"{ep_text}  ·  {rem_str}  ({pct}% regardé)")
-                self.btn_resume.setText("  Reprendre l'épisode")
+                self.status_label.setText(f"{ep_text}  ·  {rem_str}  ({pct_watched})")
+                self.btn_resume.setText("  " + tr("Reprendre l'épisode"))
         elif is_replay:
-            self.status_label.setText(f"{rem_str}  ·  {pct}% regardé")
-            self.btn_resume.setText("  Reprendre le Replay")
+            self.status_label.setText(f"{rem_str}  ·  {pct_watched}")
+            self.btn_resume.setText("  " + tr("Reprendre le Replay"))
         else:
-            self.status_label.setText(f"{rem_str}  ·  {pct}% regardé")
-            self.btn_resume.setText("  Reprendre la lecture")
+            self.status_label.setText(f"{rem_str}  ·  {pct_watched}")
+            self.btn_resume.setText("  " + tr("Reprendre la lecture"))
 
         # Mise à jour barre de progression
         if is_completed:
@@ -492,6 +503,15 @@ class HeroBannerWidget(QFrame):
         if self.channel:
             self.resume_clicked.emit(self.channel, self.position)
 
+    def retranslate_ui(self):
+        """Réapplique les traductions dynamiques sur les labels et boutons de la bannière Hero."""
+        if self.item_data:
+            self.set_data(self.item_data)
+        elif hasattr(self, "title_label"):
+            self.title_label.setText(tr("Aucun média en cours"))
+            if hasattr(self, "btn_resume"):
+                self.btn_resume.setText("  " + tr("Reprendre la lecture"))
+
 
 # =========================================================================
 # 3. MINI-CARTE POUR CHAÎNE TV EN DIRECT ("RECENTLY WATCHED LIVE TV")
@@ -550,8 +570,8 @@ class LiveTvMiniCard(QFrame):
         self.name_label.setWordWrap(False)
         info_layout.addWidget(self.name_label)
 
-        grp = self.channel.group_title or self.item.get("playlist_name") or "Direct"
-        self.group_label = QLabel(grp)
+        raw_grp = self.channel.group_title or self.item.get("playlist_name") or "Direct"
+        self.group_label = QLabel(tr(raw_grp))
         self.group_label.setStyleSheet("color: #8c9bb3; font-size: 10px; font-weight: 500; background: transparent; border: none;")
         self.group_label.setWordWrap(False)
         info_layout.addWidget(self.group_label)
@@ -711,7 +731,7 @@ class DashboardPosterCard(QWidget):
             painter.setPen(QColor("#334155"))
             font = QFont("Segoe UI", 9)
             painter.setFont(font)
-            painter.drawText(p_rect.toRect(), Qt.AlignmentFlag.AlignCenter, "Affiche")
+            painter.drawText(p_rect.toRect(), Qt.AlignmentFlag.AlignCenter, tr("Affiche"))
 
         # 2. Barre de progression fine au bas du poster (également masquée par l'arrondi)
         if self.progress_info:
@@ -808,11 +828,11 @@ class DashboardPosterCard(QWidget):
                 painter.drawText(
                     QRect(ep_w + 5, self.POSTER_HEIGHT + 26, self.CARD_WIDTH - ep_w - 5, 16),
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                    f"· {pl_type} · Série"
+                    f"· {pl_type} · {tr('Série')}"
                 )
             else:
                 painter.setPen(QColor("#64748b"))
-                painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{pl_type} · Série")
+                painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{pl_type} · {tr('Série')}")
         elif is_replay:
             badge_text = "REPLAY"
             bw = painter.fontMetrics().horizontalAdvance(badge_text) + 10
@@ -830,7 +850,7 @@ class DashboardPosterCard(QWidget):
             )
         else:
             painter.setPen(QColor("#64748b"))
-            painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{pl_type} · Film")
+            painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"{pl_type} · {tr('Film')}")
 
         painter.restore()
 
@@ -1133,6 +1153,8 @@ class DashboardView(QWidget):
         self.setObjectName("dashboardView")
 
         self._init_ui()
+        from core.i18n import I18nManager
+        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
 
     def _init_ui(self):
         self.setStyleSheet("background-color: #0b0f19;")
@@ -1180,22 +1202,23 @@ class DashboardView(QWidget):
         self.container_layout.addWidget(self.hero_banner)
 
         # 2. Section "Reprendre la lecture"
-        self.sec_continue = DashboardSection("Reprendre la lecture", "continue", "Voir tout >", content_height=262, parent=self.container_widget)
+        see_all_str = tr("Voir tout") + " >"
+        self.sec_continue = DashboardSection(tr("Reprendre la lecture"), "continue", see_all_str, content_height=262, parent=self.container_widget)
         self.sec_continue.see_all_clicked.connect(lambda: self.navigate_section_requested.emit("favorites"))
         self.container_layout.addWidget(self.sec_continue)
 
-        # 3. Section "Recently watched live TV"
-        self.sec_recent_live = DashboardSection("Recently watched live TV", "live", "Voir tout >", content_height=58, parent=self.container_widget)
+        # 3. Section "TV en direct récemment regardée"
+        self.sec_recent_live = DashboardSection(tr("TV en direct récemment regardée"), "live", see_all_str, content_height=58, parent=self.container_widget)
         self.sec_recent_live.see_all_clicked.connect(self.navigate_section_requested.emit)
         self.container_layout.addWidget(self.sec_recent_live)
 
-        # 4. Section "Favorite movies & series"
-        self.sec_favs = DashboardSection("Favorite movies & series", "favorites", "Voir tout >", content_height=262, parent=self.container_widget)
+        # 4. Section "Films & Séries favoris"
+        self.sec_favs = DashboardSection(tr("Films & Séries favoris"), "favorites", see_all_str, content_height=262, parent=self.container_widget)
         self.sec_favs.see_all_clicked.connect(self.navigate_section_requested.emit)
         self.container_layout.addWidget(self.sec_favs)
 
         # 5. Section "Récemment ajoutés"
-        self.sec_recents = DashboardSection("Récemment ajoutés", "recently_added", "Voir tout >", content_height=262, parent=self.container_widget)
+        self.sec_recents = DashboardSection(tr("Récemment ajoutés"), "recently_added", see_all_str, content_height=262, parent=self.container_widget)
         self.sec_recents.see_all_clicked.connect(self.navigate_section_requested.emit)
         self.container_layout.addWidget(self.sec_recents)
 
@@ -1270,7 +1293,7 @@ class DashboardView(QWidget):
         if pl_id:
             for pl in playlists:
                 if pl.id == pl_id:
-                    active_pl_name = pl.name
+                    active_pl_name = tr(pl.name)
                     break
         self.sec_recents.title_label.setText(tr("Récemment ajoutés sur {name}", name=active_pl_name))
 
@@ -1316,10 +1339,7 @@ class DashboardView(QWidget):
     def retranslate_ui(self):
         """Met à jour les textes et en-têtes du tableau de bord."""
         if hasattr(self, "hero_banner"):
-            if hasattr(self.hero_banner, "btn_resume"):
-                self.hero_banner.btn_resume.setText("  " + tr("Reprendre la lecture"))
-            if not getattr(self.hero_banner, "channel", None):
-                self.hero_banner.title_label.setText(tr("Aucun média en cours") if hasattr(tr, "__call__") else "Aucun média en cours")
+            self.hero_banner.retranslate_ui()
 
         see_all_str = tr("Voir tout") + " >"
         if hasattr(self, "sec_continue"):
@@ -1327,16 +1347,17 @@ class DashboardView(QWidget):
             self.sec_continue.set_see_all_text(see_all_str)
 
         if hasattr(self, "sec_recent_live"):
-            self.sec_recent_live.title_label.setText(tr("TV en direct"))
+            self.sec_recent_live.title_label.setText(tr("TV en direct récemment regardée"))
             self.sec_recent_live.set_see_all_text(see_all_str)
 
         if hasattr(self, "sec_favs"):
-            self.sec_favs.title_label.setText(tr("Vos Favoris"))
+            self.sec_favs.title_label.setText(tr("Films & Séries favoris"))
             self.sec_favs.set_see_all_text(see_all_str)
 
         if hasattr(self, "sec_recents"):
+            self.sec_recents.title_label.setText(tr("Récemment ajoutés"))
             self.sec_recents.set_see_all_text(see_all_str)
 
-        self.refresh_content()
+        self.refresh_view()
 
 

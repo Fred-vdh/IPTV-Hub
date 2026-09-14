@@ -2358,6 +2358,138 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "fr": "Chargement des saisons et épisodes...",
         "en": "Loading seasons and episodes...",
     },
+    "Favoris": {
+        "fr": "Favoris",
+        "en": "Favorites",
+    },
+    "Tous": {
+        "fr": "Tous",
+        "en": "All",
+    },
+    "la liste": {
+        "fr": "la liste",
+        "en": "the playlist",
+    },
+    "Liste :": {
+        "fr": "Liste :",
+        "en": "Playlist:",
+    },
+    "Ma liste de lecture": {
+        "fr": "Ma liste de lecture",
+        "en": "My playlist",
+    },
+    "ma liste de lecture": {
+        "fr": "ma liste de lecture",
+        "en": "my playlist",
+    },
+    "Film": {
+        "fr": "Film",
+        "en": "Movie",
+    },
+    "Série": {
+        "fr": "Série",
+        "en": "Series",
+    },
+    "Replay": {
+        "fr": "Replay",
+        "en": "Replay",
+    },
+    "Il reste {hours} h {mins:02d} min": {
+        "fr": "Il reste {hours} h {mins:02d} min",
+        "en": "{hours}h {mins:02d}m left",
+    },
+    "Il reste {hours} h {mins} min": {
+        "fr": "Il reste {hours} h {mins} min",
+        "en": "{hours}h {mins}m left",
+    },
+    "Il reste {mins} min": {
+        "fr": "Il reste {mins} min",
+        "en": "{mins} min left",
+    },
+    "Il reste {time}": {
+        "fr": "Il reste {time}",
+        "en": "{time} left",
+    },
+    "{pct}% regardé": {
+        "fr": "{pct} % regardé",
+        "en": "{pct}% watched",
+    },
+    "{pct} % regardé": {
+        "fr": "{pct} % regardé",
+        "en": "{pct}% watched",
+    },
+    "Reprendre le Replay": {
+        "fr": "Reprendre le Replay",
+        "en": "Resume Replay",
+    },
+    "  Reprendre le Replay": {
+        "fr": "  Reprendre le Replay",
+        "en": "  Resume Replay",
+    },
+    "Lancer l'épisode suivant": {
+        "fr": "Lancer l'épisode suivant",
+        "en": "Play next episode",
+    },
+    "  Lancer l'épisode suivant": {
+        "fr": "  Lancer l'épisode suivant",
+        "en": "  Play next episode",
+    },
+    "Voir la série": {
+        "fr": "Voir la série",
+        "en": "View series",
+    },
+    "  Voir la série": {
+        "fr": "  Voir la série",
+        "en": "  View series",
+    },
+    "Épisode suivant disponible": {
+        "fr": "Épisode suivant disponible",
+        "en": "Next episode available",
+    },
+    "Série à reprendre": {
+        "fr": "Série à reprendre",
+        "en": "Series in progress",
+    },
+    "Recently watched live TV": {
+        "fr": "TV en direct récemment regardée",
+        "en": "Recently watched live TV",
+    },
+    "TV en direct récemment regardée": {
+        "fr": "TV en direct récemment regardée",
+        "en": "Recently watched live TV",
+    },
+    "Favorite movies & series": {
+        "fr": "Films & Séries favoris",
+        "en": "Favorite movies & series",
+    },
+    "Films & Séries favoris": {
+        "fr": "Films & Séries favoris",
+        "en": "Favorite movies & series",
+    },
+    "Voir tout >": {
+        "fr": "Voir tout >",
+        "en": "See all >",
+    },
+    "Voir tout": {
+        "fr": "Voir tout",
+        "en": "See all",
+    },
+    "Voir les {count} >": {
+        "fr": "Voir les {count} >",
+        "en": "See all {count} >",
+    },
+    "Affiche": {
+        "fr": "Affiche",
+        "en": "Poster",
+    },
+    "Direct": {
+        "fr": "Direct",
+        "en": "Live",
+    },
+    "Aucune liste de lecture": {
+        "fr": "Aucune liste de lecture",
+        "en": "No playlist",
+    },
 }
 
 
@@ -2468,4 +2600,26 @@ def get_locale_month(month_1_based: int, short: bool = True) -> str:
     if lang == "en":
         return MONTHS_SHORT_EN[idx] if short else MONTHS_EN[idx]
     return MONTHS_SHORT_FR[idx] if short else MONTHS_FR[idx]
+
+
+def format_locale_date(dt, date_format: str = "short") -> str:
+    """
+    Formate une date datetime selon la langue active :
+    - 'short' : '14/09/2026' (FR) ou '09/14/2026' (EN)
+    - 'friendly' : '14 sept., 22:30' (FR) ou 'Sep 14, 22:30' (EN)
+    """
+    if not dt:
+        return ""
+    lang = I18nManager.instance().current_language
+    if date_format == "short":
+        if lang == "en":
+            return dt.strftime("%m/%d/%Y")
+        return dt.strftime("%d/%m/%Y")
+    elif date_format == "friendly":
+        m_str = get_locale_month(dt.month, short=True)
+        if lang == "en":
+            return f"{m_str} {dt.day}, {dt.hour:02d}:{dt.minute:02d}"
+        return f"{dt.day} {m_str}, {dt.hour:02d}:{dt.minute:02d}"
+    return dt.strftime("%d/%m/%Y")
+
 

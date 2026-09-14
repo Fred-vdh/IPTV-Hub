@@ -384,6 +384,8 @@ class RecentlyWatchedView(QWidget):
 
         self._cards: List[RecentlyWatchedCardWidget] = []
         self._init_ui()
+        from core.i18n import I18nManager
+        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
 
     def _init_ui(self):
         self.setStyleSheet("background-color: #111622;")
@@ -700,14 +702,22 @@ class RecentlyWatchedView(QWidget):
 
     def retranslate_ui(self):
         """Met à jour les textes des onglets et boutons de RecentlyWatchedView."""
+        if hasattr(self, "title_label"):
+            self.title_label.setText(tr("Récemment regardés"))
         if hasattr(self, "header_title"):
-            self.header_title.setText(tr("Historique de lecture"))
-        if hasattr(self, "btn_live"):
-            self.btn_live.setText(tr("Chaînes TV"))
+            self.header_title.setText(tr("Récemment regardés"))
+        if hasattr(self, "btn_all"):
+            self.btn_all.setText(tr("Tous"))
         if hasattr(self, "btn_movies"):
             self.btn_movies.setText(tr("Films"))
         if hasattr(self, "btn_series"):
             self.btn_series.setText(tr("Séries"))
-        if hasattr(self, "clear_btn"):
-            self.clear_btn.setText(" " + tr("Effacer l'historique"))
+        if hasattr(self, "btn_live"):
+            self.btn_live.setText(tr("TV en direct"))
+        if hasattr(self, "btn_this_playlist"):
+            self.btn_this_playlist.setText("  " + tr("Cette liste de lecture"))
+        if hasattr(self, "btn_all_playlists"):
+            self.btn_all_playlists.setText("  " + tr("Toutes les listes de lecture"))
+        if hasattr(self, "btn_clear_all"):
+            self.btn_clear_all.setToolTip(tr("Effacer l'historique"))
         self.refresh_view()

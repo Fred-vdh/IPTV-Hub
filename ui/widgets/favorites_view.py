@@ -30,13 +30,13 @@ FRENCH_MONTHS = [
 
 
 def format_favorite_date(iso_str: Optional[str]) -> str:
-    """Formate une date ISO en chaîne conviviale en français (ex: '2 sept., 01:20')."""
+    """Formate une date ISO en chaîne conviviale localisée selon la langue active."""
     if not iso_str:
         return ""
     try:
+        from core.i18n import format_locale_date
         dt = datetime.fromisoformat(iso_str)
-        month_name = FRENCH_MONTHS[dt.month - 1]
-        return f"{dt.day} {month_name}, {dt.hour:02d}:{dt.minute:02d}"
+        return format_locale_date(dt, "friendly")
     except Exception:
         return ""
 
@@ -341,6 +341,8 @@ class FavoritesView(QWidget):
 
         self._cards: List[FavoriteCardWidget] = []
         self._init_ui()
+        from core.i18n import I18nManager
+        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
 
     def _init_ui(self):
         self.setStyleSheet("background-color: #111622;")
@@ -353,9 +355,9 @@ class FavoritesView(QWidget):
         top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(12)
 
-        title_label = QLabel("Favoris")
-        title_label.setStyleSheet("color: #f8fafc; font-size: 20px; font-weight: 700;")
-        top_bar.addWidget(title_label)
+        self.title_label = QLabel(tr("Favoris"))
+        self.title_label.setStyleSheet("color: #f8fafc; font-size: 20px; font-weight: 700;")
+        top_bar.addWidget(self.title_label)
 
         top_bar.addStretch(1)
 
@@ -372,19 +374,19 @@ class FavoritesView(QWidget):
         media_layout.setContentsMargins(2, 2, 2, 2)
         media_layout.setSpacing(2)
 
-        self.btn_movies = QPushButton("Films")
+        self.btn_movies = QPushButton(tr("Films"))
         self.btn_movies.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_movies.setFixedHeight(28)
         self.btn_movies.clicked.connect(lambda: self._set_stream_type("movie"))
         media_layout.addWidget(self.btn_movies)
 
-        self.btn_series = QPushButton("Séries")
+        self.btn_series = QPushButton(tr("Séries"))
         self.btn_series.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_series.setFixedHeight(28)
         self.btn_series.clicked.connect(lambda: self._set_stream_type("series"))
         media_layout.addWidget(self.btn_series)
 
-        self.btn_live = QPushButton("TV en direct")
+        self.btn_live = QPushButton(tr("TV en direct"))
         self.btn_live.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_live.setFixedHeight(28)
         self.btn_live.clicked.connect(lambda: self._set_stream_type("live"))
@@ -641,12 +643,14 @@ class FavoritesView(QWidget):
 
     def retranslate_ui(self):
         """Met à jour les textes des onglets et boutons de FavoritesView."""
+        if hasattr(self, "title_label"):
+            self.title_label.setText(tr("Favoris"))
         if hasattr(self, "header_title"):
             self.header_title.setText(tr("Vos Favoris"))
         if hasattr(self, "btn_all"):
             self.btn_all.setText(tr("Tous"))
         if hasattr(self, "btn_live"):
-            self.btn_live.setText(tr("Chaînes TV"))
+            self.btn_live.setText(tr("TV en direct"))
         if hasattr(self, "btn_movies"):
             self.btn_movies.setText(tr("Films"))
         if hasattr(self, "btn_series"):

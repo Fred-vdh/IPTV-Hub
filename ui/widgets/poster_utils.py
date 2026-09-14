@@ -24,7 +24,8 @@ def format_poster_added_date(dt_input: Any) -> str:
             dt = dt_input
         else:
             return ''
-        return dt.strftime('%d/%m/%Y')
+        from core.i18n import format_locale_date
+        return format_locale_date(dt, "short")
     except Exception:
         return ''
 
