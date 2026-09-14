@@ -89,7 +89,7 @@ Vous pouvez télécharger la version adaptée à votre système directement depu
 | **Windows 10 / 11** | **Installateur (`.exe`)** | Assistant d'installation complet (raccourcis bureau, menu Démarrer, DLLs incluses) | 📥 [**Télécharger l'installateur Windows**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.4/IPTV_Hub_Setup.exe) |
 | **Windows 10 / 11** | **Version Portable (`.zip`)** | Prêt à l'emploi sans installation (décompressez et lancez `IPTV_Hub.exe`) | 📥 [**Télécharger la version Portable**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.4/IPTV_Hub_Portable_Win64.zip) |
 | **Linux** (Toutes distributions) | **Paquet d'installation (`.tar.gz`)** | Installation automatique avec intégration bureau XDG et raccourci dans vos applications | 📥 [**Télécharger le paquet Linux**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.4/IPTV_Hub_Linux.tar.gz) |
-| **Linux** (Autonome) | **Fichier AppImage** | Exécutable tout-en-un sans installation requise (double-clic direct) | 📥 [**Télécharger l'AppImage**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.4/IPTV_Hub-x86_64.AppImage) |
+| **Linux** (Autonome) | **Fichier AppImage** | Exécutable tout-en-un sans installation requise | ⏳ *(En cours de compilation / Bientôt disponible)* |
 
 ---
 
@@ -154,13 +154,8 @@ Vous pouvez télécharger la version adaptée à votre système directement depu
 
 *(Astuce sous Ubuntu/Debian/Zorin OS : installez les dépendances système en une ligne : `sudo apt install -y python3-venv python3-pip libmpv-dev libmpv2`)*
 
-#### Méthode 2 : AppImage (Sans installation)
-1. Téléchargez [`IPTV_Hub-x86_64.AppImage`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.4/IPTV_Hub-x86_64.AppImage).
-2. Rendez le fichier exécutable :
-   ```bash
-   chmod +x IPTV_Hub-x86_64.AppImage
-   ```
-3. Double-cliquez dessus pour lancer IPTV Hub !
+#### Méthode 2 : AppImage (Sans installation - Bientôt disponible)
+Le paquet autonome tout-en-un `.AppImage` (permettant de lancer l'application d'un simple double-clic sans aucune dépendance) est actuellement en cours de préparation et sera disponible dans une prochaine mise à jour.
 
 ---
 
