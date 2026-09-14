@@ -3118,6 +3118,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "replay_view") and hasattr(self.replay_view, "retranslate_ui"):
             self.replay_view.retranslate_ui()
 
+        if hasattr(self, "epg_timeline_panel") and hasattr(self.epg_timeline_panel, "retranslate_ui"):
+            self.epg_timeline_panel.retranslate_ui()
+
         if hasattr(self, "favorites_view") and hasattr(self.favorites_view, "retranslate_ui"):
             self.favorites_view.retranslate_ui()
 

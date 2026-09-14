@@ -40,7 +40,7 @@ class CategoryItemWidget(QFrame):
         layout.setContentsMargins(14, 4, 10, 4)
         layout.setSpacing(8)
 
-        display_name = clean_category_display_name(self.name)
+        display_name = tr(clean_category_display_name(self.name))
         self.name_label = QLabel(display_name)
         layout.addWidget(self.name_label, stretch=1)
 
@@ -123,7 +123,8 @@ class CategoriesPanel(QFrame):
         header_row.setContentsMargins(4, 0, 4, 0)
         header_row.setSpacing(4)
 
-        self.title_label = QLabel("Catégories en direct")
+        self._title_key = "Catégories en direct"
+        self.title_label = QLabel(tr("Catégories en direct"))
         self.title_label.setStyleSheet("font-size: 13px; font-weight: 700; color: #f8fafc;")
         header_row.addWidget(self.title_label)
         header_row.addStretch()
@@ -134,7 +135,7 @@ class CategoriesPanel(QFrame):
         self.search_btn.setIconSize(QSize(18, 18))
         self.search_btn.setFixedSize(28, 28)
         self.search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.search_btn.setToolTip("Rechercher une catégorie")
+        self.search_btn.setToolTip(tr("Rechercher une catégorie"))
         self.search_btn.setStyleSheet("background: transparent; border: none; border-radius: 4px;")
         self.search_btn.clicked.connect(self._toggle_search_box)
         header_row.addWidget(self.search_btn)
@@ -145,7 +146,7 @@ class CategoriesPanel(QFrame):
         self.sort_btn.setIconSize(QSize(18, 18))
         self.sort_btn.setFixedSize(28, 28)
         self.sort_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sort_btn.setToolTip("Trier les catégories")
+        self.sort_btn.setToolTip(tr("Trier les catégories"))
         self.sort_btn.setStyleSheet("background: transparent; border: none; border-radius: 4px;")
         self.sort_btn.clicked.connect(self._show_sort_menu)
         header_row.addWidget(self.sort_btn)
@@ -156,7 +157,7 @@ class CategoriesPanel(QFrame):
         self.filter_btn.setIconSize(QSize(18, 18))
         self.filter_btn.setFixedSize(28, 28)
         self.filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.filter_btn.setToolTip("Gérer et filtrer les catégories / chaînes")
+        self.filter_btn.setToolTip(tr("Gérer et filtrer les catégories"))
         self.filter_btn.setStyleSheet("background: transparent; border: none; border-radius: 4px;")
         self.filter_btn.clicked.connect(self.manage_categories_requested.emit)
         header_row.addWidget(self.filter_btn)
@@ -165,7 +166,7 @@ class CategoriesPanel(QFrame):
 
         # 2. Barre de recherche (escamotable)
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Filtrer les catégories...")
+        self.search_edit.setPlaceholderText(tr("Filtrer les catégories..."))
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.setStyleSheet("""
             background-color: #20293a;
@@ -207,7 +208,8 @@ class CategoriesPanel(QFrame):
         layout.addWidget(self.list_widget)
 
     def set_title(self, title: str):
-        self.title_label.setText(title)
+        self._title_key = title
+        self.title_label.setText(tr(title))
 
     def set_categories(self, categories: List[Tuple[str, int]], default_selected: Optional[str] = None):
         self._all_categories = categories
@@ -230,7 +232,7 @@ class CategoriesPanel(QFrame):
         # "default" conserve l'ordre exact transmis par le serveur
 
         for name, count in cats:
-            display_name = clean_category_display_name(name)
+            display_name = tr(clean_category_display_name(name))
             if search_txt and (search_txt not in name.lower() and search_txt not in display_name.lower()):
                 continue
 
@@ -341,8 +343,14 @@ class CategoriesPanel(QFrame):
 
     def retranslate_ui(self):
         """Met à jour les textes, placeholders et infobulles de CategoriesPanel."""
-        self.search_btn.setToolTip(tr("Filtrer les catégories..."))
-        self.sort_btn.setToolTip(tr("Trier par :"))
-        self.filter_btn.setToolTip(tr("Gérer les catégories"))
-        self.search_edit.setPlaceholderText(tr("Filtrer les catégories..."))
+        if hasattr(self, "_title_key") and hasattr(self, "title_label"):
+            self.title_label.setText(tr(self._title_key))
+        if hasattr(self, "search_btn"):
+            self.search_btn.setToolTip(tr("Rechercher une catégorie"))
+        if hasattr(self, "sort_btn"):
+            self.sort_btn.setToolTip(tr("Trier les catégories"))
+        if hasattr(self, "filter_btn"):
+            self.filter_btn.setToolTip(tr("Gérer et filtrer les catégories"))
+        if hasattr(self, "search_edit"):
+            self.search_edit.setPlaceholderText(tr("Filtrer les catégories..."))
         self._render_categories()

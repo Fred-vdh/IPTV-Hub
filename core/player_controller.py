@@ -651,10 +651,6 @@ class PlayerController(QObject):
             except Exception:
                 pass
             try:
-                self._player.command("quit", "0")
-            except Exception:
-                pass
-            try:
                 self._player.terminate()
             except Exception:
                 pass

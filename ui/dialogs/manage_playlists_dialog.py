@@ -17,24 +17,24 @@ from core.database import Database
 from core.xtream_client import XtreamClient
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
 from ui.dialogs.add_playlist import AddPlaylistDialog, PlaylistImportWorker
+from core.i18n import tr, get_locale_month
 
 
 def _format_exp_date(exp_str: Optional[str]) -> str:
     if not exp_str:
-        return "Inconnue"
+        return tr("Inconnue")
     try:
         val = int(exp_str)
         dt = datetime.fromtimestamp(val)
-        months = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
-        m_name = months[dt.month - 1]
+        m_name = get_locale_month(dt.month, short=True)
         now = datetime.now()
         days_left = (dt - now).days
         if days_left > 0:
-            return f"{dt.day} {m_name} {dt.year} ({days_left} j restants)"
+            return f"{dt.day} {m_name} {dt.year} (" + tr("{days} j restants", days=days_left) + ")"
         elif days_left == 0:
-            return f"Aujourd'hui ({dt.strftime('%H:%M')})"
+            return tr("Aujourd'hui, {time}", time=dt.strftime('%H:%M'))
         else:
-            return f"Expiré ({dt.day} {m_name} {dt.year})"
+            return tr("Expiré ({date})", date=f"{dt.day} {m_name} {dt.year}")
     except Exception:
         return str(exp_str)
 
@@ -150,14 +150,14 @@ class PlaylistItemWidget(QFrame):
                 live_c = counts.get("live", 0)
                 movie_c = counts.get("movie", 0)
                 series_c = counts.get("series", 0)
-                live_str = f"{live_c:,} chaînes TV".replace(",", " ")
-                movie_str = f"{movie_c:,} films".replace(",", " ")
-                series_str = f"{series_c:,} séries".replace(",", " ")
+                live_str = f"{live_c:,} {tr('chaînes TV')}".replace(",", " ")
+                movie_str = f"{movie_c:,} {tr('films')}".replace(",", " ")
+                series_str = f"{series_c:,} {tr('séries')}".replace(",", " ")
                 counts_text = f"{live_str}   •   {movie_str}   •   {series_str}"
             except Exception:
-                counts_text = f"{self.playlist.channel_count:,} chaînes".replace(",", " ")
+                counts_text = f"{self.playlist.channel_count:,} {tr('chaînes')}".replace(",", " ")
         else:
-            counts_text = f"{self.playlist.channel_count:,} chaînes".replace(",", " ")
+            counts_text = f"{self.playlist.channel_count:,} {tr('chaînes')}".replace(",", " ")
 
         counts_label = QLabel(counts_text)
         counts_label.setStyleSheet("color: #e2e8f0; font-size: 13px; font-weight: 600;")
@@ -168,7 +168,7 @@ class PlaylistItemWidget(QFrame):
         display_src = src_info
         if len(display_src) > 75:
             display_src = display_src[:72] + "..."
-        source_label = QLabel(f"Source : {display_src}")
+        source_label = QLabel(tr("Source : {source}", source=display_src))
         source_label.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 400;")
         source_label.setToolTip(src_info)
         info_layout.addWidget(source_label)
@@ -200,11 +200,11 @@ class PlaylistItemWidget(QFrame):
         btn_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         # Synchroniser / Recharger
-        sync_btn = QPushButton(" Recharger")
+        sync_btn = QPushButton(" " + tr("Recharger"))
         sync_btn.setIcon(get_icon("sync", color=DEFAULT_ICON_COLOR))
         sync_btn.setIconSize(QSize(16, 16))
         sync_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        sync_btn.setToolTip("Recharger et synchroniser les flux depuis le serveur")
+        sync_btn.setToolTip(tr("Recharger et synchroniser les flux depuis le serveur"))
         sync_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2b364c;
@@ -227,11 +227,11 @@ class PlaylistItemWidget(QFrame):
         btn_layout.addWidget(sync_btn)
 
         # Modifier
-        edit_btn = QPushButton(" Modifier")
+        edit_btn = QPushButton(" " + tr("Modifier"))
         edit_btn.setIcon(get_icon("edit", color=DEFAULT_ICON_COLOR))
         edit_btn.setIconSize(QSize(16, 16))
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        edit_btn.setToolTip("Modifier les identifiants ou l'URL de cette liste")
+        edit_btn.setToolTip(tr("Modifier les identifiants ou l'URL de cette liste"))
         edit_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2b364c;
@@ -254,11 +254,11 @@ class PlaylistItemWidget(QFrame):
         btn_layout.addWidget(edit_btn)
 
         # Supprimer
-        del_btn = QPushButton(" Supprimer")
+        del_btn = QPushButton(" " + tr("Supprimer"))
         del_btn.setIcon(get_icon("delete", color="#f87171"))
         del_btn.setIconSize(QSize(16, 16))
         del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        del_btn.setToolTip("Supprimer cette liste de lecture et ses chaînes de SQLite")
+        del_btn.setToolTip(tr("Supprimer cette liste de lecture et ses chaînes de SQLite"))
         del_btn.setStyleSheet("""
             QPushButton {
                 background-color: rgba(239, 68, 68, 0.15);
@@ -284,7 +284,7 @@ class PlaylistItemWidget(QFrame):
 
     def _format_exp_date(self, exp_val: Optional[str]) -> str:
         if not exp_val or exp_val == "None" or exp_val == "0":
-            return "Illimitée"
+            return tr("Illimitée")
         try:
             ts = float(exp_val)
             dt = datetime.fromtimestamp(ts)
@@ -299,17 +299,17 @@ class PlaylistItemWidget(QFrame):
         status = (self.playlist.account_status or "Inconnu").strip()
         status_lower = status.lower()
         if status_lower in ("active", "actif"):
-            status_text = "Actif"
+            status_text = tr("Actif")
             status_color = "#10b981"
             status_bg = "rgba(16, 185, 129, 0.15)"
             status_border = "rgba(16, 185, 129, 0.35)"
         elif status_lower in ("expired", "expiré", "banned", "disabled"):
-            status_text = "Expiré" if "expir" in status_lower else "Inactif"
+            status_text = tr("Expiré") if "expir" in status_lower else tr("Inactif")
             status_color = "#ef4444"
             status_bg = "rgba(239, 68, 68, 0.15)"
             status_border = "rgba(239, 68, 68, 0.35)"
         else:
-            status_text = status if status != "Inconnu" else "Compte Xtream"
+            status_text = status if status != "Inconnu" else tr("Inconnu")
             status_color = "#94a3b8"
             status_bg = "rgba(148, 163, 184, 0.15)"
             status_border = "rgba(148, 163, 184, 0.35)"
@@ -329,7 +329,7 @@ class PlaylistItemWidget(QFrame):
 
         # Expiration
         exp_str = self._format_exp_date(self.playlist.exp_date)
-        self.exp_badge.setText(f"Expiration : {exp_str}")
+        self.exp_badge.setText(tr("Expiration : {date}", date=exp_str))
         self.exp_badge.setStyleSheet("""
             QLabel {
                 background-color: #2b364c;
@@ -351,7 +351,7 @@ class PlaylistItemWidget(QFrame):
 
         local_act = 1 if getattr(self, "is_currently_playing", False) else 0
         total_act = max(server_act, local_act)
-        self.conn_badge.setText(f"Écrans : {total_act} / {max_c}")
+        self.conn_badge.setText(tr("Écrans : {active} / {max}", active=total_act, max=max_c))
 
         if total_act > 0:
             self.conn_badge.setStyleSheet("""
@@ -427,7 +427,7 @@ class ManagePlaylistsDialog(QDialog):
         super().__init__(parent)
         self.db = db
         self.currently_playing_playlist_id = currently_playing_playlist_id
-        self.setWindowTitle("Gestion des listes de lecture")
+        self.setWindowTitle(tr("Gestion des listes de lecture"))
         self.resize(960, 620)
         self.setMinimumSize(840, 520)
         self._sync_worker: Optional[PlaylistImportWorker] = None
@@ -457,12 +457,12 @@ class ManagePlaylistsDialog(QDialog):
 
         # En-tête avec bouton d'ajout
         header_row = QHBoxLayout()
-        header_label = QLabel("Listes de lecture enregistrées")
+        header_label = QLabel(tr("Listes de lecture enregistrées"))
         header_label.setStyleSheet("font-size: 19px; font-weight: 700; color: #ffffff;")
         header_row.addWidget(header_label)
         header_row.addStretch()
 
-        add_btn = QPushButton(" Ajouter une liste")
+        add_btn = QPushButton(" " + tr("Ajouter une liste"))
         add_btn.setIcon(get_icon("add", color="#ffffff"))
         add_btn.setIconSize(QSize(18, 18))
         add_btn.setProperty("class", "primary-btn")
@@ -492,7 +492,7 @@ class ManagePlaylistsDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
 
-        close_btn = QPushButton(" Fermer")
+        close_btn = QPushButton(" " + tr("Fermer"))
         close_btn.setIcon(get_icon("close", color=DEFAULT_ICON_COLOR))
         close_btn.setIconSize(QSize(18, 18))
         close_btn.setProperty("class", "secondary-btn")
@@ -507,7 +507,7 @@ class ManagePlaylistsDialog(QDialog):
 
         if not playlists:
             item = QListWidgetItem(self.list_widget)
-            lbl = QLabel("Aucune liste de lecture enregistrée dans la base SQLite.\nCliquez sur 'Ajouter une liste' pour importer vos chaînes Xtream ou M3U.")
+            lbl = QLabel(tr("Aucune liste de lecture enregistrée dans la base SQLite.\nCliquez sur 'Ajouter une liste' pour importer vos chaînes Xtream ou M3U."))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet("color: #64748b; font-size: 14px; padding: 40px; line-height: 1.6;")
             item.setSizeHint(QSize(0, 120))
@@ -538,7 +538,7 @@ class ManagePlaylistsDialog(QDialog):
             self._load_playlists()
 
     def _on_sync_playlist(self, playlist: Playlist):
-        self.status_label.setText(f"Synchronisation de '{playlist.name}' en cours...")
+        self.status_label.setText(tr("Synchronisation de '{name}' en cours...", name=playlist.name))
         self.progress_bar.setVisible(True)
 
         self._sync_worker = PlaylistImportWorker(self.db, playlist, self)
@@ -549,20 +549,20 @@ class ManagePlaylistsDialog(QDialog):
 
     def _on_sync_finished(self, _playlist_id: int):
         self.progress_bar.setVisible(False)
-        self.status_label.setText("Synchronisation réussie !")
+        self.status_label.setText(tr("Synchronisation réussie !"))
         self.playlists_modified.emit()
         self._load_playlists()
 
     def _on_sync_error(self, err_msg: str):
         self.progress_bar.setVisible(False)
         self.status_label.setText("")
-        QMessageBox.critical(self, "Erreur de synchronisation", f"Impossible de synchroniser la liste :\n{err_msg}")
+        QMessageBox.critical(self, tr("Erreur de synchronisation"), tr("Impossible de synchroniser la liste :\n{error}", error=err_msg))
 
     def _on_delete_playlist(self, playlist_id: int):
         reply = QMessageBox.question(
             self,
-            "Confirmer la suppression",
-            "Êtes-vous sûr de vouloir supprimer cette liste de lecture et toutes ses chaînes de SQLite ?",
+            tr("Confirmer la suppression"),
+            tr("Êtes-vous sûr de vouloir supprimer cette liste de lecture et toutes ses chaînes de SQLite ?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )

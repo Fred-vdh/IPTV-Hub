@@ -405,7 +405,7 @@ class FavoritesView(QWidget):
         scope_layout.setContentsMargins(2, 2, 2, 2)
         scope_layout.setSpacing(2)
 
-        self.btn_this_playlist = QPushButton("  Cette liste de lecture")
+        self.btn_this_playlist = QPushButton("  " + tr("Cette liste de lecture"))
         self.btn_this_playlist.setIcon(get_icon("playlist_play", color="#94a3b8"))
         self.btn_this_playlist.setIconSize(QSize(16, 16))
         self.btn_this_playlist.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -413,7 +413,7 @@ class FavoritesView(QWidget):
         self.btn_this_playlist.clicked.connect(lambda: self._set_scope(False))
         scope_layout.addWidget(self.btn_this_playlist)
 
-        self.btn_all_playlists = QPushButton("  Toutes les listes de lecture")
+        self.btn_all_playlists = QPushButton("  " + tr("Toutes les listes de lecture"))
         self.btn_all_playlists.setIcon(get_icon("language", color="#94a3b8"))
         self.btn_all_playlists.setIconSize(QSize(16, 16))
         self.btn_all_playlists.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -427,7 +427,7 @@ class FavoritesView(QWidget):
         self.btn_clear_all = QPushButton()
         self.btn_clear_all.setIcon(get_icon("delete_outline", color="#94a3b8"))
         self.btn_clear_all.setIconSize(QSize(18, 18))
-        self.btn_clear_all.setToolTip("Vider tous les favoris affichés")
+        self.btn_clear_all.setToolTip(tr("Vider tous les favoris affichés"))
         self.btn_clear_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_clear_all.setFixedSize(32, 32)
         self.btn_clear_all.setStyleSheet("""
@@ -643,12 +643,18 @@ class FavoritesView(QWidget):
         """Met à jour les textes des onglets et boutons de FavoritesView."""
         if hasattr(self, "header_title"):
             self.header_title.setText(tr("Vos Favoris"))
+        if hasattr(self, "btn_all"):
+            self.btn_all.setText(tr("Tous"))
         if hasattr(self, "btn_live"):
             self.btn_live.setText(tr("Chaînes TV"))
         if hasattr(self, "btn_movies"):
             self.btn_movies.setText(tr("Films"))
         if hasattr(self, "btn_series"):
             self.btn_series.setText(tr("Séries"))
-        if hasattr(self, "clear_btn"):
-            self.clear_btn.setText(" " + tr("Effacer l'historique"))
+        if hasattr(self, "btn_this_playlist"):
+            self.btn_this_playlist.setText("  " + tr("Cette liste de lecture"))
+        if hasattr(self, "btn_all_playlists"):
+            self.btn_all_playlists.setText("  " + tr("Toutes les listes de lecture"))
+        if hasattr(self, "btn_clear_all"):
+            self.btn_clear_all.setToolTip(tr("Vider tous les favoris affichés"))
         self.refresh_view()

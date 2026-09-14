@@ -1266,13 +1266,13 @@ class DashboardView(QWidget):
 
         # 4. Récemment ajoutés sur [Playlist]
         playlists = self.db.get_playlists()
-        active_pl_name = "la liste"
+        active_pl_name = tr("la liste")
         if pl_id:
             for pl in playlists:
                 if pl.id == pl_id:
                     active_pl_name = pl.name
                     break
-        self.sec_recents.title_label.setText(f"Récemment ajoutés sur {active_pl_name}")
+        self.sec_recents.title_label.setText(tr("Récemment ajoutés sur {name}", name=active_pl_name))
 
         recents = self.db.get_recently_added_channels(playlist_id=pl_id, limit=20)
         recent_vod = [c for c in recents if c.stream_type in ("movie", "series")]
@@ -1335,7 +1335,8 @@ class DashboardView(QWidget):
             self.sec_favs.set_see_all_text(see_all_str)
 
         if hasattr(self, "sec_recents"):
-            self.sec_recents.title_label.setText(tr("Récemment ajoutés"))
             self.sec_recents.set_see_all_text(see_all_str)
+
+        self.refresh_content()
 
 

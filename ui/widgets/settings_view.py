@@ -33,6 +33,7 @@ class SettingsView(QWidget):
         self.db = db
         self.settings: AppSettings = self.db.get_settings()
         self.setObjectName("settingsView")
+        self._cards = []
 
         self._init_ui()
         self._load_values()
@@ -56,7 +57,7 @@ class SettingsView(QWidget):
         title_row.setContentsMargins(18, 16, 18, 14)
         title_row.setSpacing(8)
 
-        self.nav_title = QLabel("Paramètres")
+        self.nav_title = QLabel(tr("Paramètres"))
         self.nav_title.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
         title_row.addWidget(self.nav_title)
         title_row.addStretch()
@@ -72,13 +73,13 @@ class SettingsView(QWidget):
         self.nav_btn_group = QButtonGroup(self)
         self.nav_btn_group.setExclusive(True)
 
-        self.btn_general = self._create_nav_btn("Général & Interface", "tune", 0, checked=True)
-        self.btn_player = self._create_nav_btn("Lecteur Vidéo", "videocam", 1)
-        self.btn_network = self._create_nav_btn("Réseau & Flux", "wifi", 2)
-        self.btn_epg = self._create_nav_btn("Guide EPG", "calendar_today", 3)
-        self.btn_storage = self._create_nav_btn("Données & Stockage", "storage", 4)
-        self.btn_backup = self._create_nav_btn("Sauvegarde & Fichiers", "content_copy", 5)
-        self.btn_about = self._create_nav_btn("À propos", "info", 6)
+        self.btn_general = self._create_nav_btn(tr("Général & Interface"), "tune", 0, checked=True)
+        self.btn_player = self._create_nav_btn(tr("Lecteur Vidéo"), "videocam", 1)
+        self.btn_network = self._create_nav_btn(tr("Réseau & Flux"), "wifi", 2)
+        self.btn_epg = self._create_nav_btn(tr("Guide EPG"), "calendar_today", 3)
+        self.btn_storage = self._create_nav_btn(tr("Données & Stockage"), "storage", 4)
+        self.btn_backup = self._create_nav_btn(tr("Sauvegarde & Fichiers"), "content_copy", 5)
+        self.btn_about = self._create_nav_btn(tr("À propos"), "info", 6)
 
         for b in [self.btn_general, self.btn_player, self.btn_network, self.btn_epg, self.btn_storage, self.btn_backup, self.btn_about]:
             nav_layout.addWidget(b)
@@ -86,7 +87,7 @@ class SettingsView(QWidget):
         nav_layout.addStretch()
 
         # Bouton fermer/retour
-        self.close_btn = QPushButton("  Fermer les paramètres")
+        self.close_btn = QPushButton("  " + tr("Fermer les paramètres"))
         self.close_btn.setIcon(get_icon("close", color=DEFAULT_ICON_COLOR))
         self.close_btn.setIconSize(QSize(16, 16))
         self.close_btn.setProperty("class", "secondary-btn")
@@ -145,7 +146,7 @@ class SettingsView(QWidget):
         bottom_row.addWidget(self.save_status)
         bottom_row.addStretch()
 
-        self.save_btn = QPushButton(" Enregistrer les paramètres")
+        self.save_btn = QPushButton(" " + tr("Enregistrer les paramètres"))
         self.save_btn.setIcon(get_icon("check_circle", color="#ffffff"))
         self.save_btn.setIconSize(QSize(18, 18))
         self.save_btn.setProperty("class", "primary-btn")
@@ -183,15 +184,16 @@ class SettingsView(QWidget):
         layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(14)
 
-        t_lbl = QLabel(title)
+        t_lbl = QLabel(tr(title))
         t_lbl.setProperty("class", "settings-card-title")
         layout.addWidget(t_lbl)
 
-        d_lbl = QLabel(desc)
+        d_lbl = QLabel(tr(desc))
         d_lbl.setProperty("class", "settings-card-desc")
         d_lbl.setWordWrap(True)
         layout.addWidget(d_lbl)
 
+        self._cards.append((t_lbl, d_lbl, title, desc))
         return card, layout
 
     def _build_general_page(self) -> QWidget:
@@ -207,7 +209,7 @@ class SettingsView(QWidget):
 
         # Langue de l'application
         r_app_lang = QHBoxLayout()
-        self.lbl_app_lang = QLabel("Langue de l'application :")
+        self.lbl_app_lang = QLabel(tr("Langue de l'application :"))
         r_app_lang.addWidget(self.lbl_app_lang)
         r_app_lang.addStretch()
         self.app_lang_combo = QComboBox()
@@ -220,18 +222,19 @@ class SettingsView(QWidget):
 
         # Thème
         r1 = QHBoxLayout()
-        self.lbl_theme = QLabel("Thème de l'interface :")
+        self.lbl_theme = QLabel(tr("Thème de l'interface :"))
         r1.addWidget(self.lbl_theme)
         r1.addStretch()
         self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Gris foncé bleuté (Par défaut)", "Sombre moderne"])
+        self.theme_combo.addItems([tr("Gris foncé bleuté (Par défaut)"), tr("Sombre moderne")])
         self.theme_combo.setFixedWidth(240)
         r1.addWidget(self.theme_combo)
         c_layout.addLayout(r1)
 
         # Langue audio préférée (Films & Séries)
         r_lang = QHBoxLayout()
-        r_lang.addWidget(QLabel("Langue audio préférée (Films & Séries) :"))
+        self.lbl_audio_lang = QLabel(tr("Langue audio préférée (Films & Séries) :"))
+        r_lang.addWidget(self.lbl_audio_lang)
         r_lang.addStretch()
         self.audio_lang_combo = QComboBox()
         self.audio_lang_combo.addItem("Français (France, VFF, VFQ)", "fra,fre,fr,French,Français,francais,VF,VFF,VFQ,TrueFrench")
@@ -248,23 +251,24 @@ class SettingsView(QWidget):
 
         # Masquage auto de l'OSD
         r2 = QHBoxLayout()
-        r2.addWidget(QLabel("Délai de masquage des contrôles vidéo :"))
+        self.lbl_osd = QLabel(tr("Délai de masquage des contrôles vidéo :"))
+        r2.addWidget(self.lbl_osd)
         r2.addStretch()
         self.osd_timeout_spin = QSpinBox()
         self.osd_timeout_spin.setRange(1, 10)
-        self.osd_timeout_spin.setSuffix(" secondes")
+        self.osd_timeout_spin.setSuffix(" " + tr("secondes"))
         self.osd_timeout_spin.setValue(4)
         self.osd_timeout_spin.setFixedWidth(140)
         r2.addWidget(self.osd_timeout_spin)
         c_layout.addLayout(r2)
 
         # Reprise de la dernière chaîne
-        self.auto_resume_cb = QCheckBox(" Reprendre automatiquement la dernière chaîne au lancement")
+        self.auto_resume_cb = QCheckBox(" " + tr("Reprendre automatiquement la dernière chaîne au lancement"))
         self.auto_resume_cb.setChecked(True)
         c_layout.addWidget(self.auto_resume_cb)
 
         # Enchaînement automatique des épisodes de série
-        self.auto_play_next_cb = QCheckBox(" Enchaîner automatiquement sur l'épisode suivant à la fin d'un épisode (Séries)")
+        self.auto_play_next_cb = QCheckBox(" " + tr("Enchaîner automatiquement sur l'épisode suivant à la fin d'un épisode (Séries)"))
         self.auto_play_next_cb.setChecked(True)
         c_layout.addWidget(self.auto_play_next_cb)
 
@@ -285,7 +289,8 @@ class SettingsView(QWidget):
 
         # Décodage matériel
         r1 = QHBoxLayout()
-        r1.addWidget(QLabel("Décodage matériel (HW Accel) :"))
+        self.lbl_hwdec = QLabel(tr("Décodage matériel (HW Accel) :"))
+        r1.addWidget(self.lbl_hwdec)
         r1.addStretch()
         self.hwdec_combo = QComboBox()
         self.hwdec_combo.addItems(["auto", "d3d11va (Windows DirectX)", "nvdec (NVIDIA)", "dxva2", "no (CPU)"])
@@ -295,7 +300,8 @@ class SettingsView(QWidget):
 
         # Désentrelacement
         r2 = QHBoxLayout()
-        r2.addWidget(QLabel("Désentrelacement vidéo :"))
+        self.lbl_deint = QLabel(tr("Désentrelacement vidéo :"))
+        r2.addWidget(self.lbl_deint)
         r2.addStretch()
         self.deint_combo = QComboBox()
         self.deint_combo.addItems(["auto (Recommandé)", "yes (Toujours activé)", "no (Désactivé)"])
@@ -305,11 +311,12 @@ class SettingsView(QWidget):
 
         # Taille du tampon cache
         r3 = QHBoxLayout()
-        r3.addWidget(QLabel("Taille du cache de préchargement :"))
+        self.lbl_buffer = QLabel(tr("Taille du cache de préchargement :"))
+        r3.addWidget(self.lbl_buffer)
         r3.addStretch()
         self.buffer_spin = QSpinBox()
         self.buffer_spin.setRange(10, 300)
-        self.buffer_spin.setSuffix(" Mo")
+        self.buffer_spin.setSuffix(" " + tr("Mo"))
         self.buffer_spin.setValue(self.settings.buffer_size_mb)
         self.buffer_spin.setFixedWidth(140)
         r3.addWidget(self.buffer_spin)
@@ -331,14 +338,16 @@ class SettingsView(QWidget):
         )
 
         # User-Agent personnalisé
-        c_layout.addWidget(QLabel("User-Agent HTTP par défaut :"))
+        self.lbl_ua = QLabel(tr("User-Agent HTTP par défaut :"))
+        c_layout.addWidget(self.lbl_ua)
         self.ua_edit = QLineEdit()
-        self.ua_edit.setPlaceholderText("Ex: VLC/3.0.18 LibVLC/3.0.18 ou Mozilla/5.0...")
+        self.ua_edit.setPlaceholderText(tr("Ex: VLC/3.0.18 LibVLC/3.0.18 ou Mozilla/5.0..."))
         c_layout.addWidget(self.ua_edit)
 
         # Timeout de connexion
         r2 = QHBoxLayout()
-        r2.addWidget(QLabel("Délai d'attente réseau (Timeout) :"))
+        self.lbl_timeout = QLabel(tr("Délai d'attente réseau (Timeout) :"))
+        r2.addWidget(self.lbl_timeout)
         r2.addStretch()
         self.timeout_spin = QSpinBox()
         self.timeout_spin.setRange(3, 60)
@@ -349,7 +358,7 @@ class SettingsView(QWidget):
         c_layout.addLayout(r2)
 
         # Reconnexion automatique
-        self.auto_reconnect_cb = QCheckBox(" Reconnexion automatique en cas de coupure de flux")
+        self.auto_reconnect_cb = QCheckBox(" " + tr("Reconnexion automatique en cas de coupure de flux"))
         self.auto_reconnect_cb.setChecked(getattr(self.settings, "auto_reconnect", True))
         c_layout.addWidget(self.auto_reconnect_cb)
 
@@ -370,11 +379,12 @@ class SettingsView(QWidget):
 
         # Intervalle d'actualisation EPG
         r1 = QHBoxLayout()
-        r1.addWidget(QLabel("Intervalle d'actualisation automatique :"))
+        self.lbl_epg_interval = QLabel(tr("Intervalle d'actualisation automatique :"))
+        r1.addWidget(self.lbl_epg_interval)
         r1.addStretch()
         self.epg_interval_spin = QSpinBox()
         self.epg_interval_spin.setRange(1, 48)
-        self.epg_interval_spin.setSuffix(" heures")
+        self.epg_interval_spin.setSuffix(" " + tr("heures"))
         self.epg_interval_spin.setValue(self.settings.epg_refresh_hours)
         self.epg_interval_spin.setFixedWidth(140)
         r1.addWidget(self.epg_interval_spin)
@@ -382,7 +392,8 @@ class SettingsView(QWidget):
 
         # Décalage horaire EPG
         r2 = QHBoxLayout()
-        r2.addWidget(QLabel("Décalage horaire EPG :"))
+        self.lbl_epg_offset = QLabel(tr("Décalage horaire EPG :"))
+        r2.addWidget(self.lbl_epg_offset)
         r2.addStretch()
         self.epg_offset_spin = QSpinBox()
         self.epg_offset_spin.setRange(-12, 12)
@@ -408,7 +419,8 @@ class SettingsView(QWidget):
         )
 
         # 1. Dossier de téléchargement
-        c_layout.addWidget(QLabel("Dossier de téléchargement des vidéos & films VOD :"))
+        self.lbl_dl = QLabel(tr("Dossier de téléchargement des vidéos & films VOD :"))
+        c_layout.addWidget(self.lbl_dl)
         dl_row = QHBoxLayout()
         dl_row.setSpacing(8)
 
@@ -416,11 +428,11 @@ class SettingsView(QWidget):
         self.download_dir_edit.setPlaceholderText(get_default_download_dir())
         dl_row.addWidget(self.download_dir_edit, stretch=1)
 
-        browse_dl_btn = QPushButton(" Parcourir...")
-        browse_dl_btn.setIcon(get_icon("folder_open", color="#e2e8f0"))
-        browse_dl_btn.setIconSize(QSize(16, 16))
-        browse_dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        browse_dl_btn.setStyleSheet("""
+        self.browse_dl_btn = QPushButton(" " + tr("Parcourir..."))
+        self.browse_dl_btn.setIcon(get_icon("folder_open", color="#e2e8f0"))
+        self.browse_dl_btn.setIconSize(QSize(16, 16))
+        self.browse_dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.browse_dl_btn.setStyleSheet("""
             QPushButton {
                 background-color: #20293d;
                 color: #e2e8f0;
@@ -435,8 +447,8 @@ class SettingsView(QWidget):
                 color: #ffffff;
             }
         """)
-        browse_dl_btn.clicked.connect(self._browse_download_dir)
-        dl_row.addWidget(browse_dl_btn)
+        self.browse_dl_btn.clicked.connect(self._browse_download_dir)
+        dl_row.addWidget(self.browse_dl_btn)
         c_layout.addLayout(dl_row)
 
         sep_dl = QFrame()
@@ -446,16 +458,17 @@ class SettingsView(QWidget):
 
         # 2. Emplacement de la base SQLite
         db_path = self.db.db_path
-        c_layout.addWidget(QLabel(f"<b>Base SQLite :</b> <span style='color: #818cf8;'>{db_path}</span>"))
+        self.lbl_db_path = QLabel(f"<b>{tr('Base SQLite :')}</b> <span style='color: #818cf8;'>{db_path}</span>")
+        c_layout.addWidget(self.lbl_db_path)
 
         # 3. Bouton vider le cache des logos
-        clear_cache_btn = QPushButton("  Vider le cache des logos de chaînes")
-        clear_cache_btn.setIcon(get_icon("delete", color="#ef4444"))
-        clear_cache_btn.setIconSize(QSize(16, 16))
-        clear_cache_btn.setProperty("class", "secondary-btn")
-        clear_cache_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        clear_cache_btn.clicked.connect(self._clear_logo_cache)
-        c_layout.addWidget(clear_cache_btn)
+        self.clear_cache_btn = QPushButton("  " + tr("Vider le cache des logos de chaînes"))
+        self.clear_cache_btn.setIcon(get_icon("delete", color="#ef4444"))
+        self.clear_cache_btn.setIconSize(QSize(16, 16))
+        self.clear_cache_btn.setProperty("class", "secondary-btn")
+        self.clear_cache_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_cache_btn.clicked.connect(self._clear_logo_cache)
+        c_layout.addWidget(self.clear_cache_btn)
 
         layout.addWidget(card)
         layout.addStretch()
@@ -485,21 +498,21 @@ class SettingsView(QWidget):
         export_layout = QVBoxLayout(export_box)
         export_layout.setSpacing(10)
 
-        exp_title = QLabel("💾 Enregistrer la configuration (Sauvegarde)")
-        exp_title.setStyleSheet("font-weight: 700; font-size: 14px; color: #ffffff;")
-        export_layout.addWidget(exp_title)
+        self.exp_title = QLabel(tr("💾 Enregistrer la configuration (Sauvegarde)"))
+        self.exp_title.setStyleSheet("font-weight: 700; font-size: 14px; color: #ffffff;")
+        export_layout.addWidget(self.exp_title)
 
-        exp_desc = QLabel(
+        self.exp_desc = QLabel(tr(
             "Exporte vos listes de lecture, comptes/serveurs, favoris, historique de visionnage, "
             "chaînes masquées et reprises de lecture dans un fichier JSON compact (~150 Ko).<br>"
             "<i>(Les chaînes brutes et affiches ne sont pas incluses pour garantir un fichier léger et rapide).</i>"
-        )
-        exp_desc.setStyleSheet("color: #94a3b8; font-size: 12px; line-height: 1.4;")
-        exp_desc.setWordWrap(True)
-        export_layout.addWidget(exp_desc)
+        ))
+        self.exp_desc.setStyleSheet("color: #94a3b8; font-size: 12px; line-height: 1.4;")
+        self.exp_desc.setWordWrap(True)
+        export_layout.addWidget(self.exp_desc)
 
         exp_btn_row = QHBoxLayout()
-        self.btn_export_config = QPushButton("  Enregistrer la configuration sous...")
+        self.btn_export_config = QPushButton("  " + tr("Enregistrer la configuration sous..."))
         self.btn_export_config.setIcon(get_icon("cloud_upload", color="#ffffff"))
         self.btn_export_config.setIconSize(QSize(18, 18))
         self.btn_export_config.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -530,21 +543,21 @@ class SettingsView(QWidget):
         import_layout = QVBoxLayout(import_box)
         import_layout.setSpacing(10)
 
-        imp_title = QLabel("📂 Charger une configuration (Restauration)")
-        imp_title.setStyleSheet("font-weight: 700; font-size: 14px; color: #ffffff;")
-        import_layout.addWidget(imp_title)
+        self.imp_title = QLabel(tr("📂 Charger une configuration (Restauration)"))
+        self.imp_title.setStyleSheet("font-weight: 700; font-size: 14px; color: #ffffff;")
+        import_layout.addWidget(self.imp_title)
 
-        imp_desc = QLabel(
+        self.imp_desc = QLabel(tr(
             "Charge un fichier de configuration précédemment sauvegardé. "
             "Le système fusionne intelligemment vos listes, cumule vos favoris et applique "
             "les reprises de lecture les plus récentes sans écraser vos données locales."
-        )
-        imp_desc.setStyleSheet("color: #94a3b8; font-size: 12px; line-height: 1.4;")
-        imp_desc.setWordWrap(True)
-        import_layout.addWidget(imp_desc)
+        ))
+        self.imp_desc.setStyleSheet("color: #94a3b8; font-size: 12px; line-height: 1.4;")
+        self.imp_desc.setWordWrap(True)
+        import_layout.addWidget(self.imp_desc)
 
         imp_btn_row = QHBoxLayout()
-        self.btn_import_config = QPushButton("  Charger un fichier de configuration...")
+        self.btn_import_config = QPushButton("  " + tr("Charger un fichier de configuration..."))
         self.btn_import_config.setIcon(get_icon("cloud_download", color="#ffffff"))
         self.btn_import_config.setIconSize(QSize(18, 18))
         self.btn_import_config.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -651,10 +664,15 @@ class SettingsView(QWidget):
             "Lecteur multimédia moderne pour flux IPTV, Xtream Codes, VOD et Séries."
         )
 
-        c_layout.addWidget(QLabel(f"<b>Version :</b> {__version__} (Édition Complète)"))
-        c_layout.addWidget(QLabel("<b>Moteur de rendu :</b> libmpv (API de rendu OpenGL / QOpenGLWidget + D3D11VA)"))
-        c_layout.addWidget(QLabel("<b>Framework UI :</b> PyQt6 & Material Symbols"))
-        c_layout.addWidget(QLabel("<b>Raccourcis clés :</b> [F / F11] Plein écran  •  [Espace] Pause  •  [◀ / ▶] Recul/Avance 10s"))
+        self.lbl_about_v = QLabel(f"<b>{tr('Version :')}</b> {__version__} ({tr('Édition Complète')})")
+        self.lbl_about_engine = QLabel(f"<b>{tr('Moteur de rendu :')}</b> libmpv (API OpenGL / QOpenGLWidget + D3D11VA)")
+        self.lbl_about_framework = QLabel(f"<b>{tr('Framework UI :')}</b> PyQt6 & Material Symbols")
+        self.lbl_about_shortcuts = QLabel(f"<b>{tr('Raccourcis clés :')}</b> [F / F11] {tr('Plein écran')}  •  [{tr('Espace')}] {tr('Pause')}  •  [◀ / ▶] {tr('Recul/Avance 10s')}")
+
+        c_layout.addWidget(self.lbl_about_v)
+        c_layout.addWidget(self.lbl_about_engine)
+        c_layout.addWidget(self.lbl_about_framework)
+        c_layout.addWidget(self.lbl_about_shortcuts)
 
         layout.addWidget(card)
         layout.addStretch()
@@ -737,12 +755,12 @@ class SettingsView(QWidget):
                 fp = os.path.join(cache_dir, f)
                 if os.path.isfile(fp):
                     os.unlink(fp)
-            QMessageBox.information(self, "Cache vidé", "Le cache des logos a été nettoyé avec succès.")
+            QMessageBox.information(self, tr("Cache vidé"), tr("Le cache des logos a été nettoyé avec succès."))
         except Exception as e:
-            QMessageBox.warning(self, "Erreur", f"Impossible de vider le cache : {e}")
+            QMessageBox.warning(self, tr("Erreur"), tr("Impossible de vider le cache : {error}", error=str(e)))
 
     def retranslate_ui(self):
-        """Met à jour les textes des onglets, en-têtes et boutons de SettingsView."""
+        """Met à jour exhaustivement les textes des onglets, en-têtes et sous-pages de SettingsView."""
         if hasattr(self, "nav_title"):
             self.nav_title.setText(tr("Paramètres"))
         if hasattr(self, "close_btn"):
@@ -766,8 +784,91 @@ class SettingsView(QWidget):
         if hasattr(self, "btn_about"):
             self.btn_about.setText("  " + tr("À propos"))
 
-        # Labels de la page générale
+        # Cartes intérieures
+        if hasattr(self, "_cards"):
+            for t_lbl, d_lbl, title, desc in self._cards:
+                t_lbl.setText(tr(title))
+                d_lbl.setText(tr(desc))
+
+        # Page Générale
         if hasattr(self, "lbl_app_lang"):
             self.lbl_app_lang.setText(tr("Langue de l'application :"))
         if hasattr(self, "lbl_theme"):
             self.lbl_theme.setText(tr("Thème de l'interface :"))
+        if hasattr(self, "theme_combo"):
+            curr_th = self.theme_combo.currentIndex()
+            self.theme_combo.setItemText(0, tr("Gris foncé bleuté (Par défaut)"))
+            self.theme_combo.setItemText(1, tr("Sombre moderne"))
+            self.theme_combo.setCurrentIndex(curr_th)
+        if hasattr(self, "lbl_audio_lang"):
+            self.lbl_audio_lang.setText(tr("Langue audio préférée (Films & Séries) :"))
+        if hasattr(self, "lbl_osd"):
+            self.lbl_osd.setText(tr("Délai de masquage des contrôles vidéo :"))
+        if hasattr(self, "osd_timeout_spin"):
+            self.osd_timeout_spin.setSuffix(" " + tr("secondes"))
+        if hasattr(self, "auto_resume_cb"):
+            self.auto_resume_cb.setText(" " + tr("Reprendre automatiquement la dernière chaîne au lancement"))
+        if hasattr(self, "auto_play_next_cb"):
+            self.auto_play_next_cb.setText(" " + tr("Enchaîner automatiquement sur l'épisode suivant à la fin d'un épisode (Séries)"))
+
+        # Page Lecteur Vidéo
+        if hasattr(self, "lbl_hwdec"):
+            self.lbl_hwdec.setText(tr("Décodage matériel (HW Accel) :"))
+        if hasattr(self, "lbl_deint"):
+            self.lbl_deint.setText(tr("Désentrelacement vidéo :"))
+        if hasattr(self, "lbl_buffer"):
+            self.lbl_buffer.setText(tr("Taille du cache de préchargement :"))
+        if hasattr(self, "buffer_spin"):
+            self.buffer_spin.setSuffix(" " + tr("Mo"))
+
+        # Page Réseau
+        if hasattr(self, "lbl_ua"):
+            self.lbl_ua.setText(tr("User-Agent HTTP par défaut :"))
+        if hasattr(self, "ua_edit"):
+            self.ua_edit.setPlaceholderText(tr("Ex: VLC/3.0.18 LibVLC/3.0.18 ou Mozilla/5.0..."))
+        if hasattr(self, "lbl_timeout"):
+            self.lbl_timeout.setText(tr("Délai d'attente réseau (Timeout) :"))
+        if hasattr(self, "auto_reconnect_cb"):
+            self.auto_reconnect_cb.setText(" " + tr("Reconnexion automatique en cas de coupure de flux"))
+
+        # Page EPG
+        if hasattr(self, "lbl_epg_interval"):
+            self.lbl_epg_interval.setText(tr("Intervalle d'actualisation automatique :"))
+        if hasattr(self, "epg_interval_spin"):
+            self.epg_interval_spin.setSuffix(" " + tr("heures"))
+        if hasattr(self, "lbl_epg_offset"):
+            self.lbl_epg_offset.setText(tr("Décalage horaire EPG :"))
+
+        # Page Stockage
+        if hasattr(self, "lbl_dl"):
+            self.lbl_dl.setText(tr("Dossier de téléchargement des vidéos & films VOD :"))
+        if hasattr(self, "browse_dl_btn"):
+            self.browse_dl_btn.setText(" " + tr("Parcourir..."))
+        if hasattr(self, "lbl_db_path"):
+            self.lbl_db_path.setText(f"<b>{tr('Base SQLite :')}</b> <span style='color: #818cf8;'>{self.db.db_path}</span>")
+        if hasattr(self, "clear_cache_btn"):
+            self.clear_cache_btn.setText("  " + tr("Vider le cache des logos de chaînes"))
+
+        # Page Sauvegarde
+        if hasattr(self, "exp_title"):
+            self.exp_title.setText(tr("💾 Enregistrer la configuration (Sauvegarde)"))
+        if hasattr(self, "exp_desc"):
+            self.exp_desc.setText(tr("Exporte vos listes de lecture, comptes/serveurs, favoris, historique de visionnage, chaînes masquées et reprises de lecture dans un fichier JSON compact (~150 Ko).<br><i>(Les chaînes brutes et affiches ne sont pas incluses pour garantir un fichier léger et rapide).</i>"))
+        if hasattr(self, "btn_export_config"):
+            self.btn_export_config.setText("  " + tr("Enregistrer la configuration sous..."))
+        if hasattr(self, "imp_title"):
+            self.imp_title.setText(tr("📂 Charger une configuration (Restauration)"))
+        if hasattr(self, "imp_desc"):
+            self.imp_desc.setText(tr("Charge un fichier de configuration précédemment sauvegardé. Le système fusionne intelligemment vos listes, cumule vos favoris et applique les reprises de lecture les plus récentes sans écraser vos données locales."))
+        if hasattr(self, "btn_import_config"):
+            self.btn_import_config.setText("  " + tr("Charger un fichier de configuration..."))
+
+        # Page À propos
+        if hasattr(self, "lbl_about_v"):
+            self.lbl_about_v.setText(f"<b>{tr('Version :')}</b> {__version__} ({tr('Édition Complète')})")
+        if hasattr(self, "lbl_about_engine"):
+            self.lbl_about_engine.setText(f"<b>{tr('Moteur de rendu :')}</b> libmpv (API OpenGL / QOpenGLWidget + D3D11VA)")
+        if hasattr(self, "lbl_about_framework"):
+            self.lbl_about_framework.setText(f"<b>{tr('Framework UI :')}</b> PyQt6 & Material Symbols")
+        if hasattr(self, "lbl_about_shortcuts"):
+            self.lbl_about_shortcuts.setText(f"<b>{tr('Raccourcis clés :')}</b> [F / F11] {tr('Plein écran')}  •  [{tr('Espace')}] {tr('Pause')}  •  [◀ / ▶] {tr('Recul/Avance 10s')}")

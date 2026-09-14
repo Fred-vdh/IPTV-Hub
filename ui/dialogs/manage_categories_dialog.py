@@ -15,6 +15,7 @@ from core.database import Database
 from core.models import Channel, clean_category_display_name
 from core.image_loader import ImageLoader
 from ui.icons import get_icon, get_pixmap
+from core.i18n import tr
 
 def _get_chevron_icons():
     from core.database import get_cache_dir
@@ -43,7 +44,7 @@ class ManageCategoriesDialog(QDialog):
         self.playlist_id = playlist_id
         self.stream_type = stream_type
 
-        self.setWindowTitle("Gérer et filtrer les catégories")
+        self.setWindowTitle(tr("Gérer et filtrer les catégories"))
         self.resize(680, 720)
         self.setMinimumSize(540, 500)
         self.setModal(True)
@@ -118,12 +119,12 @@ class ManageCategoriesDialog(QDialog):
         header_box = QVBoxLayout()
         header_box.setSpacing(4)
 
-        title_label = QLabel("Gérer les catégories")
+        title_label = QLabel(tr("Gérer les catégories"))
         title_label.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         title_label.setStyleSheet("color: #ffffff;")
         header_box.addWidget(title_label)
 
-        self.counter_label = QLabel("Sélectionnées: 0 / 0 (0 / 0 groupes)")
+        self.counter_label = QLabel(tr("Sélectionnées: 0 / 0 (0 / 0 groupes)"))
         self.counter_label.setStyleSheet("color: #94a3b8; font-size: 13px; font-weight: 500;")
         header_box.addWidget(self.counter_label)
 
@@ -133,7 +134,7 @@ class ManageCategoriesDialog(QDialog):
         actions_row = QHBoxLayout()
         actions_row.setSpacing(10)
 
-        self.select_all_btn = QPushButton(" Tout sélectionner")
+        self.select_all_btn = QPushButton(" " + tr("Tout sélectionner"))
         self.select_all_btn.setIcon(get_icon("check_circle", color="#818cf8"))
         self.select_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.select_all_btn.setStyleSheet("""
@@ -154,7 +155,7 @@ class ManageCategoriesDialog(QDialog):
         self.select_all_btn.clicked.connect(self._select_all)
         actions_row.addWidget(self.select_all_btn)
 
-        self.deselect_all_btn = QPushButton(" Tout désélectionner")
+        self.deselect_all_btn = QPushButton(" " + tr("Tout désélectionner"))
         self.deselect_all_btn.setIcon(get_icon("crop_square", color="#94a3b8"))
         self.deselect_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.deselect_all_btn.setStyleSheet("""
@@ -180,7 +181,7 @@ class ManageCategoriesDialog(QDialog):
 
         # 3. Barre de recherche de catégories
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Rechercher des catégories ou des chaînes...")
+        self.search_edit.setPlaceholderText(tr("Rechercher des catégories ou des chaînes..."))
         self.search_edit.setClearButtonEnabled(True)
         search_icon = get_icon("search", color="#94a3b8")
         self.search_edit.addAction(search_icon, QLineEdit.ActionPosition.LeadingPosition)
@@ -217,7 +218,7 @@ class ManageCategoriesDialog(QDialog):
         bottom_row.setSpacing(12)
         bottom_row.addStretch()
 
-        self.close_btn = QPushButton("Fermer")
+        self.close_btn = QPushButton(tr("Fermer"))
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.setStyleSheet("""
             QPushButton {
@@ -236,7 +237,7 @@ class ManageCategoriesDialog(QDialog):
         self.close_btn.clicked.connect(self.reject)
         bottom_row.addWidget(self.close_btn)
 
-        self.save_btn = QPushButton("Enregistrer")
+        self.save_btn = QPushButton(tr("Enregistrer"))
         self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.setStyleSheet("""
             QPushButton {
@@ -471,7 +472,13 @@ class ManageCategoriesDialog(QDialog):
                 selected_groups += 1
 
         self.counter_label.setText(
-            f"Sélectionnées: <b style='color:#38bdf8;'>{self._selected_channels}</b> / {self._total_channels}  ({selected_groups} / {total_groups} groupes)"
+            tr(
+                "Sélectionnées: <b style='color:#38bdf8;'>{selected}</b> / {total}  ({sel_groups} / {tot_groups} groupes)",
+                selected=self._selected_channels,
+                total=self._total_channels,
+                sel_groups=selected_groups,
+                tot_groups=total_groups
+            )
         )
 
     def _save_and_accept(self):

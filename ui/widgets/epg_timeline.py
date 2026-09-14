@@ -19,6 +19,7 @@ from PyQt6.QtGui import (
 from core.models import Channel, EPGProgram
 from core.database import Database
 from ui.icons import get_icon
+from core.i18n import tr
 
 
 def normalize_to_naive_dt(dt_or_str) -> Optional[datetime]:
@@ -377,7 +378,7 @@ class EPGTimelinePanel(QWidget):
         header_layout.addWidget(self.toggle_btn)
 
         # Titre Chaîne & Programme actuel
-        self.channel_title_label = QLabel("Guide des programmes")
+        self.channel_title_label = QLabel(tr("Guide des programmes"))
         self.channel_title_label.setStyleSheet("font-size: 13px; font-weight: 700; color: #ffffff;")
         self.channel_title_label.setMinimumWidth(0)
         self.channel_title_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
@@ -390,16 +391,16 @@ class EPGTimelinePanel(QWidget):
         header_layout.addWidget(self.cur_show_label)
 
         # Note / Information centrale
-        self.info_note_label = QLabel("ℹ Programme uniquement. Ce fournisseur expose l'historique mais pas le catch-up.")
+        self.info_note_label = QLabel(tr("ℹ Programme uniquement. Ce fournisseur expose l'historique mais pas le catch-up."))
         self.info_note_label.setStyleSheet("color: #64748b; font-size: 11px;")
         self.info_note_label.setMinimumWidth(0)
         self.info_note_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         header_layout.addWidget(self.info_note_label, stretch=1)
 
         # Bouton « Maintenant » (Jump to Now)
-        self.now_btn = QPushButton("🕒 Maintenant")
+        self.now_btn = QPushButton(tr("🕒 Maintenant"))
         self.now_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.now_btn.setToolTip("Centrer la frise sur l'heure actuelle")
+        self.now_btn.setToolTip(tr("Centrer la frise sur l'heure actuelle"))
         self.now_btn.setStyleSheet("""
             QPushButton {
                 background-color: #242f44;
@@ -646,3 +647,13 @@ class EPGTimelinePanel(QWidget):
                 event.accept()
                 return
         super().wheelEvent(event)
+
+    def retranslate_ui(self):
+        """Met à jour les textes traduits de la frise chronologique."""
+        if hasattr(self, "channel_title_label") and not self.channel:
+            self.channel_title_label.setText(tr("Guide des programmes"))
+        if hasattr(self, "info_note_label"):
+            self.info_note_label.setText(tr("ℹ Programme uniquement. Ce fournisseur expose l'historique mais pas le catch-up."))
+        if hasattr(self, "now_btn"):
+            self.now_btn.setText(tr("🕒 Maintenant"))
+            self.now_btn.setToolTip(tr("Centrer la frise sur l'heure actuelle"))

@@ -61,6 +61,7 @@ hiddenimports += [
     "ui",
     "ui.dialogs",
     "ui.dialogs.add_playlist",
+    "ui.dialogs.artist_filmography_dialog",
     "ui.dialogs.manage_categories_dialog",
     "ui.dialogs.manage_playlists_dialog",
     "ui.dialogs.movie_details_dialog",

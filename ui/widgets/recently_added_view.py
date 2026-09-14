@@ -20,17 +20,11 @@ from core.database import Database
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from ui.widgets.poster_utils import draw_added_date_badge
-from core.i18n import tr
-
-
-FRENCH_MONTHS = [
-    "janv.", "févr.", "mars", "avr.", "mai", "juin",
-    "juil.", "août", "sept.", "oct.", "nov.", "déc."
-]
+from core.i18n import tr, get_locale_month
 
 
 def format_recent_date(dt_input: Any) -> str:
-    """Formate une date en chaîne conviviale en français (ex: '2 sept., 14:00' ou '13 avr. 2018')."""
+    """Formate une date en chaîne conviviale localisée (ex: '2 sept., 14:00' ou '13 avr. 2018')."""
     if not dt_input:
         return ""
     try:
@@ -50,7 +44,7 @@ def format_recent_date(dt_input: Any) -> str:
         else:
             return ""
 
-        month_name = FRENCH_MONTHS[dt.month - 1]
+        month_name = get_locale_month(dt.month, short=True)
         now = datetime.now()
         if dt.year == now.year:
             return f"{dt.day} {month_name}, {dt.hour:02d}:{dt.minute:02d}"
@@ -341,7 +335,7 @@ class CarouselRowWidget(QWidget):
         header_layout.setSpacing(10)
 
         # Titre
-        self.title_lbl = QLabel(self.title)
+        self.title_lbl = QLabel(tr(self.title))
         self.title_lbl.setStyleSheet("color: #f8fafc; font-size: 16px; font-weight: 700;")
         header_layout.addWidget(self.title_lbl)
 
@@ -360,7 +354,7 @@ class CarouselRowWidget(QWidget):
         header_layout.addStretch(1)
 
         # Lien 'Parcourir tous les films >'
-        self.browse_btn = QPushButton(self.browse_text)
+        self.browse_btn = QPushButton(tr(self.browse_text))
         self.browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.browse_btn.setStyleSheet("""
             QPushButton {
@@ -459,7 +453,7 @@ class CarouselRowWidget(QWidget):
         self.count_badge.setText(str(len(channels)))
 
         if not channels:
-            empty_lbl = QLabel(f"Aucun élément récent dans {self.title.lower()}.")
+            empty_lbl = QLabel(tr("Aucun élément récent dans {category}.", category=tr(self.title).lower()))
             empty_lbl.setStyleSheet("color: #64748b; font-size: 12px; margin: 10px 0;")
             self.inner_layout.addWidget(empty_lbl)
             self.btn_scroll_right.hide()
@@ -526,6 +520,12 @@ class CarouselRowWidget(QWidget):
         self.btn_scroll_right.move(max(10, w - 46), (h - 36) // 2 - 20)
         self.btn_scroll_left.move(10, (h - 36) // 2 - 20)
 
+    def retranslate_ui(self):
+        if hasattr(self, "title_lbl"):
+            self.title_lbl.setText(tr(self.title))
+        if hasattr(self, "browse_btn"):
+            self.browse_btn.setText(tr(self.browse_text))
+
     def showEvent(self, event):
         super().showEvent(event)
         QTimer.singleShot(50, self._update_scroll_buttons)
@@ -558,9 +558,9 @@ class RecentlyAddedView(QWidget):
         root_layout.setSpacing(16)
 
         # 1. Titre principal en haut
-        title_label = QLabel("Récemment ajoutés")
-        title_label.setStyleSheet("color: #f8fafc; font-size: 20px; font-weight: 700;")
-        root_layout.addWidget(title_label)
+        self.title_label = QLabel(tr("Récemment ajoutés"))
+        self.title_label.setStyleSheet("color: #f8fafc; font-size: 20px; font-weight: 700;")
+        root_layout.addWidget(self.title_label)
 
         # 2. Zone défilante verticale globale
         self.scroll_area = QScrollArea()
@@ -656,10 +656,12 @@ class RecentlyAddedView(QWidget):
 
     def retranslate_ui(self):
         """Met à jour les textes des carrousels de RecentlyAddedView."""
-        if hasattr(self, "movies_carousel") and hasattr(self.movies_carousel, "title_label"):
-            self.movies_carousel.title_label.setText(tr("Films récemment ajoutés"))
-        if hasattr(self, "series_carousel") and hasattr(self.series_carousel, "title_label"):
-            self.series_carousel.title_label.setText(tr("Séries récemment ajoutées"))
-        if hasattr(self, "live_carousel") and hasattr(self.live_carousel, "title_label"):
-            self.live_carousel.title_label.setText(tr("TV en direct"))
+        if hasattr(self, "title_label"):
+            self.title_label.setText(tr("Récemment ajoutés"))
+        if hasattr(self, "movies_carousel") and hasattr(self.movies_carousel, "retranslate_ui"):
+            self.movies_carousel.retranslate_ui()
+        if hasattr(self, "series_carousel") and hasattr(self.series_carousel, "retranslate_ui"):
+            self.series_carousel.retranslate_ui()
+        if hasattr(self, "live_carousel") and hasattr(self.live_carousel, "retranslate_ui"):
+            self.live_carousel.retranslate_ui()
         self.refresh_view()

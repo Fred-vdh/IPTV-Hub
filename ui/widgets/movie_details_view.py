@@ -167,7 +167,7 @@ class MovieDetailsView(QWidget):
         self.back_btn = QPushButton("‹")
         self.back_btn.setFixedSize(36, 36)
         self.back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.back_btn.setToolTip("Retour à la galerie de films")
+        self.back_btn.setToolTip(tr("Retour à la galerie de films"))
         self.back_btn.setStyleSheet("""
             QPushButton {
                 background-color: rgba(30, 41, 59, 0.85);
@@ -186,10 +186,10 @@ class MovieDetailsView(QWidget):
         self.back_btn.clicked.connect(self.back_clicked.emit)
         nav_row.addWidget(self.back_btn)
 
-        nav_tag = QLabel("FICHE DU FILM")
-        nav_tag.setCursor(Qt.CursorShape.ArrowCursor)
-        nav_tag.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: 1.5px;")
-        nav_row.addWidget(nav_tag)
+        self.nav_tag = QLabel(tr("FICHE DU FILM"))
+        self.nav_tag.setCursor(Qt.CursorShape.ArrowCursor)
+        self.nav_tag.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: 1.5px;")
+        nav_row.addWidget(self.nav_tag)
         nav_row.addStretch()
         self.scroll_layout.addWidget(self.nav_row_widget)
 
@@ -262,7 +262,7 @@ class MovieDetailsView(QWidget):
         actions_row.setContentsMargins(0, 4, 0, 0)
 
         # Bouton Regarder
-        self.play_btn = QPushButton("  Regarder le film")
+        self.play_btn = QPushButton("  " + tr("Regarder le film"))
         self.play_btn.setIcon(get_icon("play_arrow", color="#ffffff"))
         self.play_btn.setIconSize(QSize(18, 18))
         self.play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -284,7 +284,7 @@ class MovieDetailsView(QWidget):
         actions_row.addWidget(self.play_btn)
 
         # Bouton "Du début"
-        self.restart_btn = QPushButton("  Du début")
+        self.restart_btn = QPushButton("  " + tr("Du début"))
         self.restart_btn.setIcon(get_icon("replay", color="#cbd5e1"))
         self.restart_btn.setIconSize(QSize(15, 15))
         self.restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -308,7 +308,7 @@ class MovieDetailsView(QWidget):
         actions_row.addWidget(self.restart_btn)
 
         # Bouton "Annuler reprise"
-        self.clear_resume_btn = QPushButton("  Annuler reprise")
+        self.clear_resume_btn = QPushButton("  " + tr("Annuler reprise"))
         self.clear_resume_btn.setIcon(get_icon("restart_alt", color="#f87171"))
         self.clear_resume_btn.setIconSize(QSize(15, 15))
         self.clear_resume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -338,7 +338,7 @@ class MovieDetailsView(QWidget):
         actions_row.addWidget(self.fav_btn)
 
         # Bouton Télécharger
-        self.download_btn = QPushButton("  Télécharger")
+        self.download_btn = QPushButton("  " + tr("Télécharger"))
         self.download_btn.setIcon(get_icon("file_download", color="#38bdf8"))
         self.download_btn.setIconSize(QSize(16, 16))
         self.download_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -369,10 +369,10 @@ class MovieDetailsView(QWidget):
         trailer_layout.setSpacing(12)
 
         trailer_header = QHBoxLayout()
-        trailer_title = QLabel("Bande-annonce")
-        trailer_title.setCursor(Qt.CursorShape.ArrowCursor)
-        trailer_title.setStyleSheet("color: #f8fafc; font-size: 15px; font-weight: 700;")
-        trailer_header.addWidget(trailer_title)
+        self.trailer_title = QLabel(tr("Bande-annonce"))
+        self.trailer_title.setCursor(Qt.CursorShape.ArrowCursor)
+        self.trailer_title.setStyleSheet("color: #f8fafc; font-size: 15px; font-weight: 700;")
+        trailer_header.addWidget(self.trailer_title)
 
         self.trailer_badge = QLabel("")
         self.trailer_badge.setStyleSheet("""
@@ -398,7 +398,7 @@ class MovieDetailsView(QWidget):
         self.trailer_thumb_label.setFixedSize(220, 124)
         self.trailer_thumb_label.setScaledContents(True)
         self.trailer_thumb_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.trailer_thumb_label.setToolTip("Cliquer pour regarder la bande-annonce dans l'application")
+        self.trailer_thumb_label.setToolTip(tr("Cliquer pour regarder la bande-annonce dans l'application"))
         self.trailer_thumb_label.mousePressEvent = lambda e: self._on_play_trailer_clicked()
         self.trailer_thumb_label.setStyleSheet("""
             QLabel {
@@ -427,7 +427,7 @@ class MovieDetailsView(QWidget):
         btns_row.setSpacing(10)
 
         # 1. Bouton lecture directe In-App
-        self.play_trailer_btn = QPushButton("  Lire la bande-annonce")
+        self.play_trailer_btn = QPushButton("  " + tr("Lire la bande-annonce"))
         self.play_trailer_btn.setIcon(get_icon("play_arrow", color="#ffffff"))
         self.play_trailer_btn.setIconSize(QSize(16, 16))
         self.play_trailer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -452,7 +452,7 @@ class MovieDetailsView(QWidget):
         btns_row.addWidget(self.play_trailer_btn)
 
         # 2. Bouton secondaire : ouvrir dans le navigateur
-        self.open_youtube_btn = QPushButton("  Ouvrir sur YouTube")
+        self.open_youtube_btn = QPushButton("  " + tr("Ouvrir sur YouTube"))
         self.open_youtube_btn.setIcon(get_icon("open_in_new", color="#cbd5e1"))
         self.open_youtube_btn.setIconSize(QSize(15, 15))
         self.open_youtube_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -505,10 +505,10 @@ class MovieDetailsView(QWidget):
         self.reviews_layout.setSpacing(12)
 
         reviews_header = QHBoxLayout()
-        reviews_title = QLabel("Avis des spectateurs (TMDB)")
-        reviews_title.setCursor(Qt.CursorShape.ArrowCursor)
-        reviews_title.setStyleSheet("color: #f8fafc; font-size: 15px; font-weight: 700;")
-        reviews_header.addWidget(reviews_title)
+        self.reviews_title = QLabel(tr("Avis des spectateurs"))
+        self.reviews_title.setCursor(Qt.CursorShape.ArrowCursor)
+        self.reviews_title.setStyleSheet("color: #f8fafc; font-size: 15px; font-weight: 700;")
+        reviews_header.addWidget(self.reviews_title)
         reviews_header.addStretch()
 
         self.reviews_badge = QLabel("")
@@ -688,11 +688,11 @@ class MovieDetailsView(QWidget):
 
     def _refresh_action_buttons(self):
         if self.resume_pos > 0:
-            self.play_btn.setText(f"  Reprendre à {_fmt(self.resume_pos)}")
+            self.play_btn.setText(f"  {tr('Reprendre à {time}', time=_fmt(self.resume_pos))}")
             self.clear_resume_btn.show()
             self.restart_btn.show()
         else:
-            self.play_btn.setText("  Regarder le film")
+            self.play_btn.setText("  " + tr("Regarder le film"))
             self.clear_resume_btn.hide()
             self.restart_btn.hide()
 
@@ -700,7 +700,7 @@ class MovieDetailsView(QWidget):
         if not self.channel:
             return
         is_fav = bool(self.channel.is_favorite)
-        self.fav_btn.setText("  Retirer des favoris" if is_fav else "  Ajouter aux favoris")
+        self.fav_btn.setText("  " + (tr("Retirer des favoris") if is_fav else tr("Ajouter aux favoris")))
         self.fav_btn.setIcon(get_icon("favorite" if is_fav else "favorite_border", color="#f43f5e"))
         self.fav_btn.setIconSize(QSize(16, 16))
         if is_fav:
@@ -821,7 +821,7 @@ class MovieDetailsView(QWidget):
 
     def _on_dl_finished(self, output_path: str):
         self.download_btn.setEnabled(True)
-        self.download_btn.setText("  ✓ Téléchargé")
+        self.download_btn.setText("  " + tr("✓ Téléchargé"))
         self.download_btn.setIcon(get_icon("check_circle", color="#4ade80"))
         self.download_btn.setStyleSheet("""
             QPushButton {
@@ -846,7 +846,7 @@ class MovieDetailsView(QWidget):
 
     def _on_dl_error(self, _):
         self.download_btn.setEnabled(True)
-        self.download_btn.setText("  Télécharger")
+        self.download_btn.setText("  " + tr("Télécharger"))
         self.download_btn.setIcon(get_icon("file_download", color="#38bdf8"))
         self._style_download_btn()
 
@@ -861,7 +861,7 @@ class MovieDetailsView(QWidget):
                     self.db.update_channel_logo(self.channel.id, cover)
                 ImageLoader.instance().request_image_priority(cover)
 
-        plot = info.get("plot") or info.get("description") or "Aucun résumé disponible pour ce film."
+        plot = info.get("plot") or info.get("description") or tr("Aucun résumé disponible pour ce film.")
         genre = info.get("genre", "")
         duration = info.get("duration", "")
         director = info.get("director", "")
@@ -878,13 +878,13 @@ class MovieDetailsView(QWidget):
 
         details = []
         if genre:
-            details.append(f"<b>Genre :</b> {genre}")
+            details.append(f"<b>{tr('Genre :')}</b> {genre}")
         if duration:
-            details.append(f"<b>Durée :</b> {duration}")
+            details.append(f"<b>{tr('Durée :')}</b> {duration}")
         if director:
-            details.append(f"<b>Réalisateur :</b> {_make_links(director)}")
+            details.append(f"<b>{tr('Réalisateur :')}</b> {_make_links(director)}")
         if cast:
-            details.append(f"<b>Acteurs :</b> {_make_links(cast)}")
+            details.append(f"<b>{tr('Acteurs :')}</b> {_make_links(cast)}")
 
         self.details_label.setText("<br>".join(details) if details else "")
         self.synopsis_label.setText(plot)
@@ -1308,13 +1308,25 @@ class MovieDetailsView(QWidget):
     def retranslate_ui(self):
         """Met à jour les libellés de la fiche film."""
         if hasattr(self, "back_btn"):
-            self.back_btn.setToolTip(tr("Retour"))
+            self.back_btn.setToolTip(tr("Retour à la galerie de films"))
+        if hasattr(self, "nav_tag"):
+            self.nav_tag.setText(tr("FICHE DU FILM"))
         if hasattr(self, "play_btn"):
-            is_resume = getattr(self, "_resume_pos", 0.0) > 0.0
-            self.play_btn.setText("  " + (tr("Reprendre") if is_resume else tr("Lecture")))
-        if hasattr(self, "trailer_btn"):
-            self.trailer_btn.setText("  " + tr("Bande-annonce"))
+            self._refresh_action_buttons()
         if hasattr(self, "restart_btn"):
-            self.restart_btn.setText("  " + tr("Ordre original"))
-        if hasattr(self, "_update_fav_btn"):
-            self._update_fav_btn()
+            self.restart_btn.setText("  " + tr("Du début"))
+        if hasattr(self, "clear_resume_btn"):
+            self.clear_resume_btn.setText("  " + tr("Annuler reprise"))
+        if hasattr(self, "download_btn"):
+            if not self._download_task or not getattr(self._download_task, "is_running", False):
+                self.download_btn.setText("  " + tr("Télécharger"))
+        if hasattr(self, "trailer_title"):
+            self.trailer_title.setText(tr("Bande-annonce"))
+        if hasattr(self, "play_trailer_btn"):
+            self.play_trailer_btn.setText("  " + tr("Lire la bande-annonce"))
+        if hasattr(self, "open_youtube_btn"):
+            self.open_youtube_btn.setText("  " + tr("Ouvrir sur YouTube"))
+        if hasattr(self, "reviews_title"):
+            self.reviews_title.setText(tr("Avis des spectateurs"))
+        self._update_fav_btn()
+

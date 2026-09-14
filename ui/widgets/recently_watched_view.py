@@ -31,24 +31,25 @@ FRENCH_MONTHS = [
 
 
 def format_watch_date(iso_str: Optional[str]) -> str:
-    """Formate une date ISO en chaîne conviviale en français (ex: 'Aujourd\'hui, 14:20', 'Hier, 21:00')."""
+    """Formate une date ISO en chaîne conviviale localisée (ex: 'Aujourd\'hui, 14:20' ou 'Today, 14:20')."""
     if not iso_str:
         return ""
     try:
+        from core.i18n import get_locale_weekday, get_locale_month
         dt = datetime.fromisoformat(iso_str)
         now = datetime.now()
         diff = now.date() - dt.date()
         time_str = f"{dt.hour:02d}:{dt.minute:02d}"
         if diff.days == 0:
-            return f"Aujourd'hui, {time_str}"
+            return tr("Aujourd'hui, {time}", time=time_str)
         elif diff.days == 1:
-            return f"Hier, {time_str}"
+            return tr("Hier, {time}", time=time_str)
         elif diff.days < 7:
-            days_fr = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-            return f"{days_fr[dt.weekday()]}, {time_str}"
+            w_str = get_locale_weekday(dt.weekday())
+            return f"{w_str}, {time_str}"
         else:
-            month_name = FRENCH_MONTHS[dt.month - 1]
-            return f"{dt.day} {month_name}, {time_str}"
+            m_str = get_locale_month(dt.month, short=True)
+            return f"{dt.day} {m_str}, {time_str}"
     except Exception:
         return ""
 
@@ -395,9 +396,9 @@ class RecentlyWatchedView(QWidget):
         top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(12)
 
-        title_label = QLabel("Récemment regardé")
-        title_label.setStyleSheet("color: #f8fafc; font-size: 20px; font-weight: 700;")
-        top_bar.addWidget(title_label)
+        self.title_label = QLabel(tr("Récemment regardés"))
+        self.title_label.setStyleSheet("color: #f8fafc; font-size: 20px; font-weight: 700;")
+        top_bar.addWidget(self.title_label)
 
         top_bar.addStretch(1)
 
@@ -414,25 +415,25 @@ class RecentlyWatchedView(QWidget):
         media_layout.setContentsMargins(2, 2, 2, 2)
         media_layout.setSpacing(2)
 
-        self.btn_all = QPushButton("Tous")
+        self.btn_all = QPushButton(tr("Tous"))
         self.btn_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_all.setFixedHeight(28)
         self.btn_all.clicked.connect(lambda: self._set_stream_type("all"))
         media_layout.addWidget(self.btn_all)
 
-        self.btn_movies = QPushButton("Films")
+        self.btn_movies = QPushButton(tr("Films"))
         self.btn_movies.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_movies.setFixedHeight(28)
         self.btn_movies.clicked.connect(lambda: self._set_stream_type("movie"))
         media_layout.addWidget(self.btn_movies)
 
-        self.btn_series = QPushButton("Séries")
+        self.btn_series = QPushButton(tr("Séries"))
         self.btn_series.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_series.setFixedHeight(28)
         self.btn_series.clicked.connect(lambda: self._set_stream_type("series"))
         media_layout.addWidget(self.btn_series)
 
-        self.btn_live = QPushButton("TV en direct")
+        self.btn_live = QPushButton(tr("TV en direct"))
         self.btn_live.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_live.setFixedHeight(28)
         self.btn_live.clicked.connect(lambda: self._set_stream_type("live"))
@@ -453,7 +454,7 @@ class RecentlyWatchedView(QWidget):
         scope_layout.setContentsMargins(2, 2, 2, 2)
         scope_layout.setSpacing(2)
 
-        self.btn_this_playlist = QPushButton("  Cette liste de lecture")
+        self.btn_this_playlist = QPushButton("  " + tr("Cette liste de lecture"))
         self.btn_this_playlist.setIcon(get_icon("playlist_play", color="#94a3b8"))
         self.btn_this_playlist.setIconSize(QSize(16, 16))
         self.btn_this_playlist.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -461,7 +462,7 @@ class RecentlyWatchedView(QWidget):
         self.btn_this_playlist.clicked.connect(lambda: self._set_scope(False))
         scope_layout.addWidget(self.btn_this_playlist)
 
-        self.btn_all_playlists = QPushButton("  Toutes les listes de lecture")
+        self.btn_all_playlists = QPushButton("  " + tr("Toutes les listes de lecture"))
         self.btn_all_playlists.setIcon(get_icon("language", color="#94a3b8"))
         self.btn_all_playlists.setIconSize(QSize(16, 16))
         self.btn_all_playlists.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -475,7 +476,7 @@ class RecentlyWatchedView(QWidget):
         self.btn_clear_all = QPushButton()
         self.btn_clear_all.setIcon(get_icon("delete_outline", color="#94a3b8"))
         self.btn_clear_all.setIconSize(QSize(18, 18))
-        self.btn_clear_all.setToolTip("Effacer l'historique")
+        self.btn_clear_all.setToolTip(tr("Effacer l'historique"))
         self.btn_clear_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_clear_all.setFixedSize(32, 32)
         self.btn_clear_all.setStyleSheet("""

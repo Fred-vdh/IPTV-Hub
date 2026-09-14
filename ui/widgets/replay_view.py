@@ -18,7 +18,7 @@ from core.database import Database
 from core.xtream_client import XtreamClient
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
-from core.i18n import tr
+from core.i18n import tr, get_locale_weekday, get_locale_month
 
 
 class _ReplayEpgWorker(QThread):
@@ -135,7 +135,7 @@ class ReplayProgramCard(QFrame):
         info_col.setSpacing(2)
         info_col.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        title = str(self.program.get("title", "Sans titre"))
+        title = str(self.program.get("title", "")) or tr("Sans titre")
         title_lbl = QLabel(title)
         title_lbl.setStyleSheet("color: #f8fafc; font-size: 13px; font-weight: 700;")
         title_lbl.setWordWrap(True)
@@ -157,7 +157,7 @@ class ReplayProgramCard(QFrame):
         btn_col.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         if is_future:
-            future_badge = QLabel("À venir")
+            future_badge = QLabel(tr("À venir"))
             future_badge.setStyleSheet("""
                 color: #64748b;
                 font-size: 11px;
@@ -169,7 +169,7 @@ class ReplayProgramCard(QFrame):
             """)
             btn_col.addWidget(future_badge)
         else:
-            play_btn = QPushButton(" Revoir")
+            play_btn = QPushButton(" " + tr("Revoir"))
             play_btn.setIcon(get_icon("play_arrow", color="#ffffff"))
             play_btn.setIconSize(QSize(14, 14))
             play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -297,12 +297,12 @@ class ReplayView(QWidget):
 
         title_vbox = QVBoxLayout()
         title_vbox.setSpacing(2)
-        section_title = QLabel("TV Replay (Rattrapage)")
-        section_title.setStyleSheet("font-size: 20px; font-weight: 800; color: #ffffff;")
-        section_sub = QLabel("Revoyez vos émissions préférées des 7 derniers jours sur les chaînes compatibles.")
-        section_sub.setStyleSheet("font-size: 12px; color: #94a3b8;")
-        title_vbox.addWidget(section_title)
-        title_vbox.addWidget(section_sub)
+        self.section_title = QLabel(tr("TV Replay (Rattrapage)"))
+        self.section_title.setStyleSheet("font-size: 20px; font-weight: 800; color: #ffffff;")
+        self.section_sub = QLabel(tr("Revoyez vos émissions préférées des 7 derniers jours sur les chaînes compatibles."))
+        self.section_sub.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        title_vbox.addWidget(self.section_title)
+        title_vbox.addWidget(self.section_sub)
         header_layout.addLayout(title_vbox)
 
         header_layout.addStretch()
@@ -325,7 +325,7 @@ class ReplayView(QWidget):
 
         # Recherche de chaînes
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Rechercher une chaîne...")
+        self.search_input.setPlaceholderText(tr("Rechercher une chaîne..."))
         self.search_input.setStyleSheet("""
             QLineEdit {
                 background-color: #1b2232;
@@ -343,7 +343,7 @@ class ReplayView(QWidget):
         left_layout.addWidget(self.search_input)
 
         # Compteur de chaînes compatibles
-        self.channel_count_lbl = QLabel("0 chaîne compatible Replay")
+        self.channel_count_lbl = QLabel(tr("0 chaîne compatible Replay"))
         self.channel_count_lbl.setStyleSheet("color: #818cf8; font-size: 11px; font-weight: 600; padding-left: 2px;")
         left_layout.addWidget(self.channel_count_lbl)
 
@@ -398,7 +398,6 @@ class ReplayView(QWidget):
         right_layout.addWidget(self.date_bar_widget)
 
         # Info chaîne active + statut de chargement
-        # Info chaîne active + statut de chargement
         status_row = QHBoxLayout()
         status_row.setSpacing(10)
 
@@ -415,7 +414,7 @@ class ReplayView(QWidget):
         self.active_channel_logo.hide()
         status_row.addWidget(self.active_channel_logo)
 
-        self.active_channel_title = QLabel("Sélectionnez une chaîne pour voir les programmes")
+        self.active_channel_title = QLabel(tr("Sélectionnez une chaîne pour voir les programmes"))
         self.active_channel_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #f8fafc;")
         status_row.addWidget(self.active_channel_title)
         status_row.addStretch()
@@ -468,25 +467,26 @@ class ReplayView(QWidget):
 
     def _build_date_buttons(self):
         """Construit les 7 boutons de sélection de jour (Aujourd'hui, Hier, J-2... J-6)."""
+        current_checked_idx = self.date_btn_group.checkedId()
+        if current_checked_idx < 0:
+            current_checked_idx = 0
+
         for btn in self.date_btn_group.buttons():
             self.date_btn_group.removeButton(btn)
             btn.deleteLater()
 
         today = datetime.now().date()
-        jours_fr = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-        mois_fr = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
 
         for i in range(7):
             d = today - timedelta(days=i)
             if i == 0:
-                label_txt = "Aujourd'hui"
-                sub_txt = f"{d.day} {mois_fr[d.month - 1]}"
+                label_txt = tr("Aujourd'hui")
             elif i == 1:
-                label_txt = "Hier"
-                sub_txt = f"{d.day} {mois_fr[d.month - 1]}"
+                label_txt = tr("Hier")
             else:
-                label_txt = f"{jours_fr[d.weekday()]}"
-                sub_txt = f"{d.day} {mois_fr[d.month - 1]}"
+                label_txt = get_locale_weekday(d.weekday(), short=False)
+
+            sub_txt = f"{d.day} {get_locale_month(d.month, short=True)}"
 
             btn = QPushButton(f"{label_txt}\n{sub_txt}")
             btn.setCheckable(True)
@@ -513,7 +513,7 @@ class ReplayView(QWidget):
                     border-color: #6366f1;
                 }
             """)
-            if i == 0:
+            if i == current_checked_idx:
                 btn.setChecked(True)
                 self._selected_date = d
 
@@ -533,7 +533,10 @@ class ReplayView(QWidget):
         self.channel_list_widget.clear()
 
         count = len(self._channels)
-        self.channel_count_lbl.setText(f"{count} chaîne{'s' if count > 1 else ''} compatible{'s' if count > 1 else ''}")
+        if count <= 1:
+            self.channel_count_lbl.setText(tr("{count} chaîne compatible", count=count))
+        else:
+            self.channel_count_lbl.setText(tr("{count} chaînes compatibles", count=count))
 
         for ch in self._channels:
             dur = ch.tv_archive_duration or 7
@@ -547,7 +550,7 @@ class ReplayView(QWidget):
         if self._channels:
             self.channel_list_widget.setCurrentRow(0)
         else:
-            self.active_channel_title.setText("Aucune chaîne avec Replay disponible.")
+            self.active_channel_title.setText(tr("Aucune chaîne avec Replay disponible."))
             self.program_list_widget.clear()
             self.programs_count_lbl.setText("")
 
@@ -559,7 +562,7 @@ class ReplayView(QWidget):
             return
         ch = self._channels[row]
         self._selected_channel = ch
-        self.active_channel_title.setText(f"Programmes : {ch.name}")
+        self.active_channel_title.setText(tr("Programmes : {name}", name=ch.name))
         if ch.logo_url:
             self.active_channel_logo.show()
             loader = ImageLoader.instance()
@@ -590,13 +593,13 @@ class ReplayView(QWidget):
             self._epg_worker = None
 
         self.program_list_widget.clear()
-        self.programs_count_lbl.setText("Chargement du guide...")
+        self.programs_count_lbl.setText(tr("Chargement du guide..."))
         self.progress_bar.setVisible(True)
 
         playlist = self.db.get_playlist(channel.playlist_id or 0)
         if not playlist or playlist.playlist_type != "xtream":
             self.progress_bar.setVisible(False)
-            self.programs_count_lbl.setText("Replay disponible uniquement sur les flux Xtream.")
+            self.programs_count_lbl.setText(tr("Replay disponible uniquement sur les flux Xtream."))
             return
 
         client = XtreamClient(playlist.server_url, playlist.username, playlist.password)
@@ -614,7 +617,7 @@ class ReplayView(QWidget):
 
     def _on_epg_error(self, err_msg: str):
         self.progress_bar.setVisible(False)
-        self.programs_count_lbl.setText("Impossible de charger les programmes d'archive.")
+        self.programs_count_lbl.setText(tr("Impossible de charger les programmes d'archive."))
 
     def _on_date_changed(self, target_date: datetime.date):
         self._selected_date = target_date
@@ -626,12 +629,12 @@ class ReplayView(QWidget):
 
         if not self._all_programs:
             item = QListWidgetItem(self.program_list_widget)
-            lbl = QLabel("Aucun programme répertorié pour cette chaîne.")
+            lbl = QLabel(tr("Aucun programme répertorié pour cette chaîne."))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet("color: #64748b; font-size: 13px; padding: 40px;")
             item.setSizeHint(QSize(0, 100))
             self.program_list_widget.setItemWidget(item, lbl)
-            self.programs_count_lbl.setText("0 programme")
+            self.programs_count_lbl.setText(tr("0 programme"))
             return
 
         matching_programs: List[Dict[str, Any]] = []
@@ -642,11 +645,15 @@ class ReplayView(QWidget):
             if start_val.startswith(target_str):
                 matching_programs.append(p)
 
-        self.programs_count_lbl.setText(f"{len(matching_programs)} programme{'s' if len(matching_programs) > 1 else ''}")
+        p_count = len(matching_programs)
+        if p_count <= 1:
+            self.programs_count_lbl.setText(tr("{count} programme", count=p_count))
+        else:
+            self.programs_count_lbl.setText(tr("{count} programmes", count=p_count))
 
         if not matching_programs:
             item = QListWidgetItem(self.program_list_widget)
-            lbl = QLabel(f"Aucun programme trouvé pour le {self._selected_date.strftime('%d/%m/%Y')}.")
+            lbl = QLabel(tr("Aucun programme trouvé pour le {date}.", date=self._selected_date.strftime('%d/%m/%Y')))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet("color: #64748b; font-size: 13px; padding: 40px;")
             item.setSizeHint(QSize(0, 100))
@@ -669,7 +676,7 @@ class ReplayView(QWidget):
 
         start_str = str(program.get("start", ""))
         end_str = str(program.get("end", ""))
-        title = str(program.get("title", "Programme Replay"))
+        title = str(program.get("title", "")) or tr("Sans titre")
 
         duration_minutes = 60
         duration_seconds = 3600.0
@@ -711,7 +718,28 @@ class ReplayView(QWidget):
 
     def retranslate_ui(self):
         """Met à jour les textes et libellés du Replay."""
+        if hasattr(self, "section_title"):
+            self.section_title.setText(tr("TV Replay (Rattrapage)"))
+        if hasattr(self, "section_sub"):
+            self.section_sub.setText(tr("Revoyez vos émissions préférées des 7 derniers jours sur les chaînes compatibles."))
         if hasattr(self, "search_input"):
-            self.search_input.setPlaceholderText(tr("Rechercher dans le Replay..."))
-        if hasattr(self, "header_title"):
-            self.header_title.setText(tr("TV Replay (Rattrapage)"))
+            self.search_input.setPlaceholderText(tr("Rechercher une chaîne..."))
+
+        self._build_date_buttons()
+
+        count = len(self._channels)
+        if hasattr(self, "channel_count_lbl"):
+            if count <= 1:
+                self.channel_count_lbl.setText(tr("{count} chaîne compatible", count=count))
+            else:
+                self.channel_count_lbl.setText(tr("{count} chaînes compatibles", count=count))
+
+        if hasattr(self, "active_channel_title"):
+            if self._selected_channel:
+                self.active_channel_title.setText(tr("Programmes : {name}", name=self._selected_channel.name))
+            elif not self._channels:
+                self.active_channel_title.setText(tr("Aucune chaîne avec Replay disponible."))
+            else:
+                self.active_channel_title.setText(tr("Sélectionnez une chaîne pour voir les programmes"))
+
+        self._filter_programs_by_date()

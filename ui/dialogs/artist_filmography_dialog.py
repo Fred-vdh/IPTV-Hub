@@ -26,6 +26,7 @@ from core.tmdb_client import (
 )
 from ui.icons import get_icon
 from ui.widgets.rounded_poster import RoundedPosterLabel
+from core.i18n import tr
 
 
 class ArtistSuggestionsWorker(QThread):
@@ -80,7 +81,7 @@ class ArtistSearchWorker(QThread):
                     if candidates and candidates[0].get("id"):
                         person = candidates[0]
                     else:
-                        self.error_occurred.emit(f"Aucune information trouvée pour '{self.artist_name}' sur TMDB.")
+                        self.error_occurred.emit(tr("Aucune information trouvée pour '{artist_name}' sur TMDB.", artist_name=self.artist_name))
                         return
 
                 p_id = person["id"]
@@ -184,9 +185,9 @@ class ArtistMediaCard(QFrame):
         layout.addWidget(self.title_label)
 
         # 3. Rôle / Personnage
-        role_txt = f"Rôle : {self.role}" if self.role and self.role != "Rôle non spécifié" else ""
+        role_txt = tr("Rôle : {role}", role=self.role) if self.role and self.role != "Rôle non spécifié" else ""
         if not role_txt and self.year:
-            role_txt = f"Année : {self.year}"
+            role_txt = tr("Année : {year}", year=self.year)
         self.role_label = QLabel(role_txt)
         self.role_label.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 500;")
         self.role_label.setWordWrap(True)
@@ -251,7 +252,7 @@ class ArtistFilmographyDialog(QDialog):
         self._worker: Optional[ArtistSearchWorker] = None
         self._profile_img_url: Optional[str] = None
 
-        self.setWindowTitle(f"Filmographie — {self.artist_name}")
+        self.setWindowTitle(tr("Filmographie — {name}", name=self.artist_name))
         self.resize(DIALOG_DEFAULT_WIDTH, DIALOG_DEFAULT_HEIGHT)
         self.setMinimumSize(DIALOG_MIN_WIDTH, DIALOG_MIN_HEIGHT)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
@@ -317,7 +318,7 @@ class ArtistFilmographyDialog(QDialog):
         self.name_label.setStyleSheet("color: #ffffff; font-size: 24px; font-weight: 700; background: transparent;")
         info_vbox.addWidget(self.name_label)
 
-        self.dept_label = QLabel("Recherche des informations sur TMDB...")
+        self.dept_label = QLabel(tr("Recherche des informations sur TMDB..."))
         self.dept_label.setStyleSheet("color: #38bdf8; font-size: 13px; font-weight: 600; background: transparent;")
         info_vbox.addWidget(self.dept_label)
 
@@ -394,7 +395,7 @@ class ArtistFilmographyDialog(QDialog):
         """)
         root_layout.addWidget(self.progress_bar)
 
-        self.status_label = QLabel("Recherche des titres disponibles dans votre abonnement IPTV...")
+        self.status_label = QLabel(tr("Recherche des titres disponibles dans votre abonnement IPTV..."))
         self.status_label.setStyleSheet("color: #94a3b8; font-size: 13px; font-style: italic;")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root_layout.addWidget(self.status_label)
@@ -457,7 +458,7 @@ class ArtistFilmographyDialog(QDialog):
 
     def _on_error(self, err_msg: str):
         self.progress_bar.hide()
-        self.status_label.setText(f"Information : {err_msg}")
+        self.status_label.setText(tr("Information : {err_msg}", err_msg=err_msg))
         self.status_label.setStyleSheet("color: #f87171; font-size: 13px;")
 
     def _on_data_ready(self, details: Dict[str, Any], matched: Dict[str, List[Dict[str, Any]]]):
@@ -469,7 +470,7 @@ class ArtistFilmographyDialog(QDialog):
         if full_name:
             self.artist_name = full_name
             self.name_label.setText(full_name)
-            self.setWindowTitle(f"Filmographie — {full_name}")
+            self.setWindowTitle(tr("Filmographie — {name}", name=full_name))
 
         p_path = details.get("profile_path")
         if p_path:
@@ -483,7 +484,7 @@ class ArtistFilmographyDialog(QDialog):
                 ImageLoader.instance().request_image_priority(self._profile_img_url)
 
         dept = details.get("known_for_department", "")
-        dept_fr = "Acteur / Actrice" if dept == "Acting" else ("Réalisateur" if dept == "Directing" else dept)
+        dept_fr = tr("Acteur / Actrice") if dept == "Acting" else (tr("Réalisateur") if dept == "Directing" else dept)
         
         b_day = details.get("birthday", "")
         place = details.get("place_of_birth", "")
@@ -492,7 +493,7 @@ class ArtistFilmographyDialog(QDialog):
             try:
                 b_date = datetime.strptime(b_day, "%Y-%m-%d")
                 age = (datetime.now() - b_date).days // 365
-                sub_info.append(f"{age} ans ({b_date.strftime('%d/%m/%Y')})")
+                sub_info.append(tr("{age} ans ({b_date})", age=age, b_date=b_date.strftime('%d/%m/%Y')))
             except Exception:
                 sub_info.append(b_day)
         if place:
@@ -512,7 +513,7 @@ class ArtistFilmographyDialog(QDialog):
 
         has_any = bool(movies or series or directed)
         if not has_any:
-            empty_lbl = QLabel(f"Aucun film ni série avec {self.artist_name} n'a été trouvé dans votre abonnement.")
+            empty_lbl = QLabel(tr("Aucun film ni série avec {artist_name} n'a été trouvé dans votre abonnement.", artist_name=self.artist_name))
             empty_lbl.setStyleSheet("color: #94a3b8; font-size: 14px; padding: 40px;")
             empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.content_layout.addWidget(empty_lbl)
@@ -521,7 +522,7 @@ class ArtistFilmographyDialog(QDialog):
         # Section Films (Acteur)
         if movies:
             self._add_section(
-                title=f"🎬 Films disponibles ({len(movies)})",
+                title=tr("🎬 Films disponibles ({count})", count=len(movies)),
                 items=movies,
                 is_movie=True
             )
@@ -529,7 +530,7 @@ class ArtistFilmographyDialog(QDialog):
         # Section Séries (Acteur)
         if series:
             self._add_section(
-                title=f"📺 Séries disponibles ({len(series)})",
+                title=tr("📺 Séries disponibles ({count})", count=len(series)),
                 items=series,
                 is_movie=False
             )
@@ -537,7 +538,7 @@ class ArtistFilmographyDialog(QDialog):
         # Section Réalisateur
         if directed:
             self._add_section(
-                title=f"🎥 En tant que Réalisateur ({len(directed)})",
+                title=tr("🎥 En tant que Réalisateur ({count})", count=len(directed)),
                 items=directed,
                 is_movie=None
             )
@@ -569,7 +570,7 @@ class ArtistFilmographyDialog(QDialog):
         btn_prev.setIconSize(QSize(18, 18))
         btn_prev.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_prev.setFixedSize(30, 30)
-        btn_prev.setToolTip("Défiler vers la gauche")
+        btn_prev.setToolTip(tr("Défiler vers la gauche"))
         btn_prev.setStyleSheet("""
             QPushButton {
                 background-color: #161f30;
@@ -590,7 +591,7 @@ class ArtistFilmographyDialog(QDialog):
         btn_next.setIconSize(QSize(18, 18))
         btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_next.setFixedSize(30, 30)
-        btn_next.setToolTip("Défiler vers la droite")
+        btn_next.setToolTip(tr("Défiler vers la droite"))
         btn_next.setStyleSheet("""
             QPushButton {
                 background-color: #161f30;
@@ -768,7 +769,7 @@ class ArtistSearchPromptDialog(QDialog):
         self._selected_person: Optional[Dict[str, Any]] = None
         self._worker: Optional[ArtistSuggestionsWorker] = None
 
-        self.setWindowTitle("Rechercher un acteur ou réalisateur")
+        self.setWindowTitle(tr("Rechercher un acteur ou réalisateur"))
         self.setFixedSize(540, 440)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
@@ -793,7 +794,7 @@ class ArtistSearchPromptDialog(QDialog):
         icon_lbl.setPixmap(get_icon("person", color="#38bdf8").pixmap(20, 20))
         header.addWidget(icon_lbl)
 
-        title_lbl = QLabel("Rechercher un Acteur ou Réalisateur")
+        title_lbl = QLabel(tr("Rechercher un Acteur ou Réalisateur"))
         title_lbl.setStyleSheet("color: #ffffff; font-size: 15px; font-weight: 700;")
         header.addWidget(title_lbl)
         header.addStretch()
@@ -818,7 +819,7 @@ class ArtistSearchPromptDialog(QDialog):
         header.addWidget(btn_close)
         layout.addLayout(header)
 
-        sub_lbl = QLabel("Tapez le prénom ou le nom : les suggestions s'affinent en temps réel. Cliquez sur un artiste pour voir sa filmographie.")
+        sub_lbl = QLabel(tr("Tapez le prénom ou le nom : les suggestions s'affinent en temps réel. Cliquez sur un artiste pour voir sa filmographie."))
         sub_lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
         sub_lbl.setWordWrap(True)
         layout.addWidget(sub_lbl)
@@ -828,7 +829,7 @@ class ArtistSearchPromptDialog(QDialog):
         input_row.setSpacing(8)
 
         self.input_edit = QLineEdit()
-        self.input_edit.setPlaceholderText("Ex : Charlie, Tom, Christopher, Drew...")
+        self.input_edit.setPlaceholderText(tr("Ex : Charlie, Tom, Christopher, Drew..."))
         self.input_edit.setText(initial_text)
         self.input_edit.setClearButtonEnabled(True)
         self.input_edit.setStyleSheet("""
@@ -849,11 +850,11 @@ class ArtistSearchPromptDialog(QDialog):
         input_row.addWidget(self.input_edit, stretch=1)
 
         # Bouton "Coller" à la souris pour faciliter l'usage 100% souris
-        btn_paste = QPushButton("Coller")
+        btn_paste = QPushButton(tr("Coller"))
         btn_paste.setIcon(get_icon("content_copy", color="#94a3b8"))
         btn_paste.setIconSize(QSize(14, 14))
         btn_paste.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_paste.setToolTip("Coller depuis le presse-papier (clic souris)")
+        btn_paste.setToolTip(tr("Coller depuis le presse-papier (clic souris)"))
         btn_paste.setStyleSheet("""
             QPushButton {
                 background-color: #1e293b;
@@ -875,7 +876,7 @@ class ArtistSearchPromptDialog(QDialog):
         layout.addLayout(input_row)
 
         # Zone centrale : Suggestions discrètes en temps réel
-        self.empty_hint_lbl = QLabel("Tapez au moins 2 lettres pour afficher les suggestions...")
+        self.empty_hint_lbl = QLabel(tr("Tapez au moins 2 lettres pour afficher les suggestions..."))
         self.empty_hint_lbl.setStyleSheet("color: #64748b; font-size: 12px; padding: 20px;")
         self.empty_hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.empty_hint_lbl)
@@ -926,7 +927,7 @@ class ArtistSearchPromptDialog(QDialog):
         btn_row.setSpacing(10)
         btn_row.addStretch()
 
-        btn_cancel = QPushButton("Annuler")
+        btn_cancel = QPushButton(tr("Annuler"))
         btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_cancel.setStyleSheet("""
             QPushButton {
@@ -946,7 +947,7 @@ class ArtistSearchPromptDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
 
-        self.btn_submit = QPushButton(" Afficher la filmographie")
+        self.btn_submit = QPushButton(tr(" Afficher la filmographie"))
         self.btn_submit.setIcon(get_icon("search", color="#ffffff"))
         self.btn_submit.setIconSize(QSize(14, 14))
         self.btn_submit.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -981,7 +982,7 @@ class ArtistSearchPromptDialog(QDialog):
 
     def _on_text_changed(self, text: str):
         self._selected_person = None
-        self.btn_submit.setText(" Afficher la filmographie")
+        self.btn_submit.setText(tr(" Afficher la filmographie"))
         self._search_timer.start()
 
     def _fetch_suggestions(self):
@@ -989,14 +990,14 @@ class ArtistSearchPromptDialog(QDialog):
         if len(query) < 2:
             self.suggestions_list.clear()
             self.suggestions_list.hide()
-            self.empty_hint_lbl.setText("Tapez au moins 2 lettres pour afficher les suggestions...")
+            self.empty_hint_lbl.setText(tr("Tapez au moins 2 lettres pour afficher les suggestions..."))
             self.empty_hint_lbl.show()
             return
 
         if self._worker and self._worker.isRunning():
             self._worker.terminate()
 
-        self.empty_hint_lbl.setText("Recherche des artistes correspondants...")
+        self.empty_hint_lbl.setText(tr("Recherche des artistes correspondants..."))
         self.empty_hint_lbl.show()
 
         self._worker = ArtistSuggestionsWorker(query, language=self.language, parent=self)
@@ -1010,7 +1011,7 @@ class ArtistSearchPromptDialog(QDialog):
 
         self.suggestions_list.clear()
         if not results:
-            self.empty_hint_lbl.setText(f'Aucun artiste trouvé pour "{query}".')
+            self.empty_hint_lbl.setText(tr('Aucun artiste trouvé pour "{query}".', query=query))
             self.empty_hint_lbl.show()
             self.suggestions_list.hide()
             return
@@ -1033,7 +1034,7 @@ class ArtistSearchPromptDialog(QDialog):
                 self.input_edit.blockSignals(True)
                 self.input_edit.setText(name)
                 self.input_edit.blockSignals(False)
-                self.btn_submit.setText(f" Afficher la filmographie de {name}")
+                self.btn_submit.setText(tr(" Afficher la filmographie de {name}", name=name))
 
     def _on_item_double_clicked(self, item: QListWidgetItem):
         self._on_item_clicked(item)

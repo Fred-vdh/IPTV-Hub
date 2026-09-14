@@ -23,7 +23,7 @@ from core.models import Channel, EPGProgram
 from core.database import Database
 from core.image_loader import ImageLoader
 from ui.icons import get_icon, get_pixmap
-from core.i18n import tr
+from core.i18n import tr, get_locale_weekday, get_locale_month
 
 ROW_HEIGHT = 58
 CHANNEL_COL_WIDTH = 220
@@ -99,7 +99,7 @@ class EPGHeroCard(QFrame):
         top_row = QHBoxLayout()
         top_row.setSpacing(10)
 
-        self.channel_name_lbl = QLabel("Sélectionnez une émission")
+        self.channel_name_lbl = QLabel(tr("Sélectionnez une émission"))
         self.channel_name_lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #a5b4fc;")
         top_row.addWidget(self.channel_name_lbl)
 
@@ -107,7 +107,7 @@ class EPGHeroCard(QFrame):
         self.time_lbl.setStyleSheet("font-size: 12px; font-weight: 500; color: #94a3b8;")
         top_row.addWidget(self.time_lbl)
 
-        self.status_badge = QLabel("EN DIRECT")
+        self.status_badge = QLabel(tr("EN DIRECT"))
         self.status_badge.setStyleSheet("""
             background-color: #ef4444;
             color: #ffffff;
@@ -136,13 +136,13 @@ class EPGHeroCard(QFrame):
         info_layout.addLayout(top_row)
 
         # Titre du programme
-        self.title_lbl = QLabel("Aucun programme sélectionné")
+        self.title_lbl = QLabel(tr("Aucun programme sélectionné"))
         self.title_lbl.setStyleSheet("font-size: 17px; font-weight: 700; color: #f8fafc;")
         self.title_lbl.setWordWrap(False)
         info_layout.addWidget(self.title_lbl)
 
         # Description / Synopsis
-        self.desc_lbl = QLabel("Cliquez sur un programme dans la grille ci-dessous pour voir ses détails ou double-cliquez pour regarder la chaîne.")
+        self.desc_lbl = QLabel(tr("Cliquez sur un programme dans la grille ci-dessous pour voir ses détails ou double-cliquez pour regarder la chaîne."))
         self.desc_lbl.setStyleSheet("font-size: 12px; color: #94a3b8; line-height: 1.3;")
         self.desc_lbl.setWordWrap(True)
         self.desc_lbl.setMaximumHeight(36)
@@ -151,7 +151,7 @@ class EPGHeroCard(QFrame):
         main_layout.addLayout(info_layout, stretch=1)
 
         # 3. Bouton d'action "Regarder la chaîne" (Droite)
-        self.play_btn = QPushButton(" Regarder la chaîne")
+        self.play_btn = QPushButton(" " + tr("Regarder la chaîne"))
         self.play_btn.setIcon(get_icon("play_arrow", color="#ffffff"))
         self.play_btn.setIconSize(QSize(20, 20))
         self.play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -185,10 +185,10 @@ class EPGHeroCard(QFrame):
         self.program = program
 
         if not channel:
-            self.channel_name_lbl.setText("Sélectionnez une émission")
-            self.title_lbl.setText("Aucun programme sélectionné")
+            self.channel_name_lbl.setText(tr("Sélectionnez une émission"))
+            self.title_lbl.setText(tr("Aucun programme sélectionné"))
             self.time_lbl.setText("")
-            self.desc_lbl.setText("Cliquez sur un programme dans la grille ci-dessous pour voir ses détails.")
+            self.desc_lbl.setText(tr("Cliquez sur un programme dans la grille ci-dessous pour voir ses détails."))
             self.status_badge.setVisible(False)
             self.category_badge.setVisible(False)
             self.logo_label.setText("TV")
@@ -221,11 +221,13 @@ class EPGHeroCard(QFrame):
             if st and et:
                 dur_mins = int((et - st).total_seconds() / 60)
                 dur_str = f"{dur_mins // 60}h{dur_mins % 60:02d}" if dur_mins >= 60 else f"{dur_mins} min"
-                self.time_lbl.setText(f"{st.strftime('%H:%M')} - {et.strftime('%H:%M')}  •  Durée : {dur_str}")
+                dur_lbl = tr("Durée : {dur}", dur=dur_str)
+                self.time_lbl.setText(f"{st.strftime('%H:%M')} - {et.strftime('%H:%M')}  •  {dur_lbl}")
             else:
                 self.time_lbl.setText("")
 
             is_cur = program.is_current()
+            self.status_badge.setText(tr("EN DIRECT"))
             self.status_badge.setVisible(is_cur)
 
             if program.category:
@@ -234,14 +236,14 @@ class EPGHeroCard(QFrame):
             else:
                 self.category_badge.setVisible(False)
 
-            desc = program.description or "Aucun synopsis détaillé n'est fourni pour cette émission."
+            desc = program.description or tr("Aucun synopsis détaillé n'est fourni pour cette émission.")
             self.desc_lbl.setText(desc)
         else:
-            self.title_lbl.setText("Guide indisponible")
+            self.title_lbl.setText(tr("Guide indisponible"))
             self.time_lbl.setText("")
             self.status_badge.setVisible(False)
             self.category_badge.setVisible(False)
-            self.desc_lbl.setText(f"Aucune information de programme EPG trouvée pour {channel.name}.")
+            self.desc_lbl.setText(tr("Aucune information de programme EPG trouvée pour {channel}.", channel=channel.name))
 
     def _on_play_clicked(self):
         if self.channel:
@@ -750,9 +752,9 @@ class EPGGridView(QFrame):
         title_icon.setPixmap(get_pixmap("calendar_month", color="#60a5fa", size=24))
         title_icon.setFixedSize(24, 24)
         title_box.addWidget(title_icon)
-        title_lbl = QLabel("Guide des Programmes (EPG)")
-        title_lbl.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
-        title_box.addWidget(title_lbl)
+        self.title_lbl = QLabel(tr("Guide des Programmes (EPG)"))
+        self.title_lbl.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
+        title_box.addWidget(self.title_lbl)
         ctrl_bar.addLayout(title_box)
 
         self.date_bar = QHBoxLayout()
@@ -760,7 +762,7 @@ class EPGGridView(QFrame):
         self._build_date_buttons()
         ctrl_bar.addLayout(self.date_bar)
 
-        self.now_btn = QPushButton(" Aller à maintenant")
+        self.now_btn = QPushButton(" " + tr("Aller à maintenant"))
         self.now_btn.setIcon(get_icon("schedule", color="#60a5fa"))
         self.now_btn.setIconSize(QSize(16, 16))
         self.now_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -804,7 +806,7 @@ class EPGGridView(QFrame):
         self.filter_btn.setIcon(get_icon("filter_list", color="#cbd5e1"))
         self.filter_btn.setIconSize(QSize(16, 16))
         self.filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.filter_btn.setToolTip("Gérer et filtrer les catégories et chaînes")
+        self.filter_btn.setToolTip(tr("Gérer et filtrer les catégories et chaînes"))
         self.filter_btn.setStyleSheet("""
             QPushButton {
                 background-color: #1e2638;
@@ -820,7 +822,7 @@ class EPGGridView(QFrame):
         ctrl_bar.addWidget(self.filter_btn)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Rechercher une chaîne...")
+        self.search_input.setPlaceholderText(tr("Rechercher une chaîne..."))
         self.search_input.setFixedWidth(200)
         self.search_input.setStyleSheet("""
             QLineEdit {
@@ -843,7 +845,7 @@ class EPGGridView(QFrame):
         zoom_out_btn = QPushButton("-")
         zoom_out_btn.setFixedSize(26, 26)
         zoom_out_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        zoom_out_btn.setToolTip("Dézoomer la frise temporelle")
+        zoom_out_btn.setToolTip(tr("Dézoomer la frise temporelle"))
         zoom_out_btn.setStyleSheet("background-color: #1e2638; border: 1px solid #33415c; border-radius: 4px; color: #cbd5e1; font-weight: bold;")
         zoom_out_btn.clicked.connect(lambda: self._adjust_zoom(-0.6))
         zoom_box.addWidget(zoom_out_btn)
@@ -851,7 +853,7 @@ class EPGGridView(QFrame):
         zoom_in_btn = QPushButton("+")
         zoom_in_btn.setFixedSize(26, 26)
         zoom_in_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        zoom_in_btn.setToolTip("Zoomer la frise temporelle")
+        zoom_in_btn.setToolTip(tr("Zoomer la frise temporelle"))
         zoom_in_btn.setStyleSheet("background-color: #1e2638; border: 1px solid #33415c; border-radius: 4px; color: #cbd5e1; font-weight: bold;")
         zoom_in_btn.clicked.connect(lambda: self._adjust_zoom(0.6))
         zoom_box.addWidget(zoom_in_btn)
@@ -896,9 +898,9 @@ class EPGGridView(QFrame):
         """)
         corner_layout = QHBoxLayout(corner_widget)
         corner_layout.setContentsMargins(14, 0, 10, 0)
-        corner_lbl = QLabel("CHAÎNES")
-        corner_lbl.setStyleSheet("background: transparent; border: none; font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 1px;")
-        corner_layout.addWidget(corner_lbl)
+        self.corner_lbl = QLabel(tr("CHAÎNES"))
+        self.corner_lbl.setStyleSheet("background: transparent; border: none; font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 1px;")
+        corner_layout.addWidget(self.corner_lbl)
         top_grid_row.addWidget(corner_widget)
 
         self.header_scroll = QScrollArea()
@@ -959,20 +961,17 @@ class EPGGridView(QFrame):
         today = date.today()
         days_offset = [-1, 0, 1, 2, 3, 4, 5]
 
-        weekday_fr = ["Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam.", "Dim."]
-        month_fr = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
-
         for offset in days_offset:
             d = today + timedelta(days=offset)
             if offset == 0:
-                label = "Aujourd'hui"
+                label = tr("Aujourd'hui")
             elif offset == -1:
-                label = "Hier"
+                label = tr("Hier")
             elif offset == 1:
-                label = "Demain"
+                label = tr("Demain")
             else:
-                w_str = weekday_fr[d.weekday()]
-                m_str = month_fr[d.month - 1]
+                w_str = get_locale_weekday(d.weekday(), short=True)
+                m_str = get_locale_month(d.month, short=True)
                 label = f"{w_str} {d.day} {m_str}"
 
             btn = QPushButton(label)
@@ -1049,7 +1048,7 @@ class EPGGridView(QFrame):
         cur_data = self.cat_combo.currentData()
         self.cat_combo.blockSignals(True)
         self.cat_combo.clear()
-        self.cat_combo.addItem("Toutes les chaînes", "")
+        self.cat_combo.addItem(tr("Toutes les chaînes"), "")
 
         if self.playlist_id:
             groups = self.db.get_groups(self.playlist_id, stream_type="live", only_enabled=True)
@@ -1217,11 +1216,21 @@ class EPGGridView(QFrame):
 
     def retranslate_ui(self):
         """Met à jour les textes, boutons et placeholders d'EPGGridView."""
+        if hasattr(self, "title_lbl"):
+            self.title_lbl.setText(tr("Guide des Programmes (EPG)"))
         if hasattr(self, "hero_card") and hasattr(self.hero_card, "play_btn"):
-            self.hero_card.play_btn.setText(" " + tr("Lecture"))
+            self.hero_card.play_btn.setText(" " + tr("Regarder la chaîne"))
+            if not self.hero_card.channel:
+                self.hero_card.channel_name_lbl.setText(tr("Sélectionnez une émission"))
+                self.hero_card.title_lbl.setText(tr("Aucun programme sélectionné"))
+                self.hero_card.desc_lbl.setText(tr("Cliquez sur un programme dans la grille ci-dessous pour voir ses détails."))
         if hasattr(self, "search_input"):
-            self.search_input.setPlaceholderText(tr("Rechercher dans le guide TV..."))
+            self.search_input.setPlaceholderText(tr("Rechercher une chaîne..."))
         if hasattr(self, "now_btn"):
-            self.now_btn.setText(" " + tr("En direct maintenant"))
-        if hasattr(self, "_build_date_buttons"):
-            self._build_date_buttons()
+            self.now_btn.setText(" " + tr("Aller à maintenant"))
+        if hasattr(self, "filter_btn"):
+            self.filter_btn.setToolTip(tr("Gérer et filtrer les catégories et chaînes"))
+        if hasattr(self, "corner_lbl"):
+            self.corner_lbl.setText(tr("CHAÎNES"))
+        self._build_date_buttons()
+        self._load_categories()

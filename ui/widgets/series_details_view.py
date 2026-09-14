@@ -574,7 +574,7 @@ class SeriesDetailsView(QWidget):
         self.back_btn.setFixedSize(36, 36)
         self.back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.back_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.back_btn.setToolTip("Retour à la galerie de séries")
+        self.back_btn.setToolTip(tr("Retour à la galerie de séries"))
         self.back_btn.setStyleSheet("""
             QPushButton {
                 background-color: rgba(30, 41, 59, 0.85);
@@ -593,10 +593,10 @@ class SeriesDetailsView(QWidget):
         self.back_btn.clicked.connect(self.back_clicked.emit)
         nav_row.addWidget(self.back_btn)
 
-        nav_tag = QLabel("FICHE DE LA SÉRIE")
-        nav_tag.setCursor(Qt.CursorShape.ArrowCursor)
-        nav_tag.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: 1.5px;")
-        nav_row.addWidget(nav_tag)
+        self.nav_tag = QLabel(tr("FICHE DE LA SÉRIE"))
+        self.nav_tag.setCursor(Qt.CursorShape.ArrowCursor)
+        self.nav_tag.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: 1.5px;")
+        nav_row.addWidget(self.nav_tag)
         nav_row.addStretch()
         self.content_layout.addWidget(self.nav_row_widget)
 
@@ -623,7 +623,7 @@ class SeriesDetailsView(QWidget):
 
         # Titre de la section
         seasons_title_row = QHBoxLayout()
-        self.seasons_title_lbl = QLabel("Saisons et épisodes")
+        self.seasons_title_lbl = QLabel(tr("Saisons et épisodes"))
         self.seasons_title_lbl.setCursor(Qt.CursorShape.ArrowCursor)
         self.seasons_title_lbl.setStyleSheet("color: #ffffff; font-size: 18px; font-weight: 800;")
         seasons_title_row.addWidget(self.seasons_title_lbl)
@@ -662,10 +662,10 @@ class SeriesDetailsView(QWidget):
         trailer_layout.setSpacing(12)
 
         trailer_header = QHBoxLayout()
-        trailer_title = QLabel("Bande-annonce de la série")
-        trailer_title.setCursor(Qt.CursorShape.ArrowCursor)
-        trailer_title.setStyleSheet("color: #f8fafc; font-size: 15px; font-weight: 700;")
-        trailer_header.addWidget(trailer_title)
+        self.trailer_title = QLabel(tr("Bande-annonce de la série"))
+        self.trailer_title.setCursor(Qt.CursorShape.ArrowCursor)
+        self.trailer_title.setStyleSheet("color: #f8fafc; font-size: 15px; font-weight: 700;")
+        trailer_header.addWidget(self.trailer_title)
 
         self.trailer_badge = QLabel("")
         self.trailer_badge.setStyleSheet("""
@@ -691,7 +691,7 @@ class SeriesDetailsView(QWidget):
         self.trailer_thumb_label.setFixedSize(220, 124)
         self.trailer_thumb_label.setScaledContents(True)
         self.trailer_thumb_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.trailer_thumb_label.setToolTip("Cliquer pour regarder la bande-annonce dans l'application")
+        self.trailer_thumb_label.setToolTip(tr("Cliquer pour regarder la bande-annonce dans l'application"))
         self.trailer_thumb_label.mousePressEvent = lambda e: self._on_play_trailer_clicked()
         self.trailer_thumb_label.setStyleSheet("""
             QLabel {
@@ -720,7 +720,7 @@ class SeriesDetailsView(QWidget):
         btns_row.setSpacing(10)
 
         # 1. Bouton lecture directe In-App
-        self.play_trailer_btn = QPushButton("  Lire la bande-annonce")
+        self.play_trailer_btn = QPushButton("  " + tr("Lire la bande-annonce"))
         self.play_trailer_btn.setIcon(get_icon("play_arrow", color="#ffffff"))
         self.play_trailer_btn.setIconSize(QSize(16, 16))
         self.play_trailer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -745,7 +745,7 @@ class SeriesDetailsView(QWidget):
         btns_row.addWidget(self.play_trailer_btn)
 
         # 2. Bouton secondaire : ouvrir dans le navigateur
-        self.open_youtube_btn = QPushButton("  Ouvrir sur YouTube")
+        self.open_youtube_btn = QPushButton("  " + tr("Ouvrir sur YouTube"))
         self.open_youtube_btn.setIcon(get_icon("open_in_new", color="#cbd5e1"))
         self.open_youtube_btn.setIconSize(QSize(15, 15))
         self.open_youtube_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -850,7 +850,7 @@ class SeriesDetailsView(QWidget):
         meta_box.addWidget(self.plot_label)
 
         # Distribution & Réalisateur
-        self.cast_label = QLabel("Distribution : —")
+        self.cast_label = QLabel(f"{tr('Distribution :')} —")
         self.cast_label.setCursor(Qt.CursorShape.ArrowCursor)
         self.cast_label.setStyleSheet("color: #94a3b8; font-size: 12px;")
         self.cast_label.setWordWrap(True)
@@ -858,7 +858,7 @@ class SeriesDetailsView(QWidget):
         self.cast_label.linkActivated.connect(self._on_artist_link_clicked)
         meta_box.addWidget(self.cast_label)
 
-        self.director_label = QLabel("Réalisateur : —")
+        self.director_label = QLabel(f"{tr('Réalisateur :')} —")
         self.director_label.setCursor(Qt.CursorShape.ArrowCursor)
         self.director_label.setStyleSheet("color: #94a3b8; font-size: 12px;")
         self.director_label.setWordWrap(True)
@@ -870,7 +870,7 @@ class SeriesDetailsView(QWidget):
         actions_row = QHBoxLayout()
         actions_row.setSpacing(12)
 
-        self.resume_btn = QPushButton("  Lancer la lecture")
+        self.resume_btn = QPushButton("  " + tr("Lancer la lecture"))
         self.resume_btn.setIcon(get_icon("play_arrow", color="#0f172a"))
         self.resume_btn.setIconSize(QSize(20, 20))
         self.resume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -892,7 +892,7 @@ class SeriesDetailsView(QWidget):
         self.resume_btn.clicked.connect(self._on_resume_clicked)
         actions_row.addWidget(self.resume_btn)
 
-        self.fav_btn = QPushButton("  Ajouter aux favoris")
+        self.fav_btn = QPushButton("  " + tr("Ajouter aux favoris"))
         self.fav_btn.setIcon(get_icon("favorite_border", color="#f43f5e"))
         self.fav_btn.setIconSize(QSize(18, 18))
         self.fav_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1196,11 +1196,11 @@ class SeriesDetailsView(QWidget):
 
             cast = info.get("cast", "") or info.get("actors", "")
             if cast:
-                self.cast_label.setText(f"Distribution : {_make_links(cast)}")
+                self.cast_label.setText(f"{tr('Distribution :')} {_make_links(cast)}")
 
             director = info.get("director", "") or info.get("creators", "")
             if director:
-                self.director_label.setText(f"Réalisateur : {_make_links(director)}")
+                self.director_label.setText(f"{tr('Réalisateur :')} {_make_links(director)}")
 
             # Image de fond backdrop
             backdrop_url = info.get("backdrop_path", "") or info.get("fanart", "")
@@ -1568,10 +1568,11 @@ class SeriesDetailsView(QWidget):
             selected_idx = 0
             for idx, s in enumerate(sorted_seasons):
                 is_completed = self._is_season_completed(s, progress_map)
+                s_label = tr("Saison {num}", num=s)
                 if is_completed:
-                    combo.addItem(get_icon("check_circle", color="#10b981"), f"Saison {s}  ✓", userData=s)
+                    combo.addItem(get_icon("check_circle", color="#10b981"), f"{s_label}  ✓", userData=s)
                 else:
-                    combo.addItem(f"Saison {s}", userData=s)
+                    combo.addItem(s_label, userData=s)
                 if s == self.current_season:
                     selected_idx = idx
 
@@ -1584,7 +1585,7 @@ class SeriesDetailsView(QWidget):
             self.seasons_tabs_layout.addStretch()
         else:
             for s in sorted_seasons:
-                btn = QPushButton(f"Saison {s}")
+                btn = QPushButton(tr("Saison {num}", num=s))
                 btn.setProperty("season_num", s)
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1668,6 +1669,7 @@ class SeriesDetailsView(QWidget):
             widget = item.widget() if item else None
             if isinstance(widget, QPushButton) and widget.property("season_num") is not None:
                 s_val = str(widget.property("season_num"))
+                widget.setText(tr("Saison {num}", num=s_val))
                 is_comp = self._is_season_completed(s_val, progress_map)
                 if is_comp:
                     widget.setIcon(get_icon("check_circle", color="#10b981"))
@@ -1680,12 +1682,13 @@ class SeriesDetailsView(QWidget):
                 for idx in range(widget.count()):
                     s_val = str(widget.itemData(idx))
                     is_comp = self._is_season_completed(s_val, progress_map)
+                    s_label = tr("Saison {num}", num=s_val)
                     if is_comp:
                         widget.setItemIcon(idx, get_icon("check_circle", color="#10b981"))
-                        widget.setItemText(idx, f"Saison {s_val}  ✓")
+                        widget.setItemText(idx, f"{s_label}  ✓")
                     else:
                         widget.setItemIcon(idx, QIcon())
-                        widget.setItemText(idx, f"Saison {s_val}")
+                        widget.setItemText(idx, s_label)
                     if s_val == str(self.current_season):
                         widget.setCurrentIndex(idx)
                 widget.blockSignals(False)
@@ -1715,7 +1718,7 @@ class SeriesDetailsView(QWidget):
 
         episodes = self.episodes_by_season.get(self.current_season, [])
         if not episodes:
-            empty_lbl = QLabel("Aucun épisode disponible dans cette saison.")
+            empty_lbl = QLabel(tr("Aucun épisode disponible dans cette saison."))
             empty_lbl.setStyleSheet("color: #64748b; font-size: 13px; margin: 20px 0;")
             self.episodes_grid.addWidget(empty_lbl, 0, 0)
             return
@@ -1970,12 +1973,12 @@ class SeriesDetailsView(QWidget):
 
     def _update_resume_button_text(self):
         if self._video_widget:
-            self.resume_btn.setText("  Lecture en cours...")
+            self.resume_btn.setText("  " + tr("Lecture en cours..."))
             self.resume_btn.setEnabled(False)
             return
         self.resume_btn.setEnabled(True)
         if not self.all_episodes_flat:
-            self.resume_btn.setText("  Lancer la lecture")
+            self.resume_btn.setText("  " + tr("Lancer la lecture"))
             self.resume_btn.setIcon(get_icon("play_arrow", color="#0f172a"))
             return
 
@@ -1995,17 +1998,17 @@ class SeriesDetailsView(QWidget):
                 e_int = int(e_num)
             except (ValueError, TypeError):
                 e_int = 1
-            self.resume_btn.setText(f"  Reprendre : S{s_int:02d}E{e_int:02d} ({short_title})")
+            self.resume_btn.setText(f"  {tr('Reprendre : S{s:02d}E{e:02d} ({title})', s=s_int, e=e_int, title=short_title)}")
             self.resume_btn.setIcon(get_icon("play_arrow", color="#0f172a"))
-            self.resume_btn.setToolTip("Reprendre la lecture" if action_type == "resume" else "Lancer l'épisode suivant")
+            self.resume_btn.setToolTip(tr("Reprendre la lecture") if action_type == "resume" else tr("Lancer l'épisode suivant"))
         elif action_type == "restart":
-            self.resume_btn.setText("  Recommencer la série")
+            self.resume_btn.setText("  " + tr("Recommencer la série"))
             self.resume_btn.setIcon(get_icon("replay", color="#0f172a"))
-            self.resume_btn.setToolTip("Recommencer la série depuis le premier épisode")
+            self.resume_btn.setToolTip(tr("Recommencer la série depuis le premier épisode"))
         else:
-            self.resume_btn.setText("  Lancer la lecture")
+            self.resume_btn.setText("  " + tr("Lancer la lecture"))
             self.resume_btn.setIcon(get_icon("play_arrow", color="#0f172a"))
-            self.resume_btn.setToolTip("Lancer le premier épisode")
+            self.resume_btn.setToolTip(tr("Lancer le premier épisode"))
 
     def _on_resume_clicked(self):
         if not self.all_episodes_flat:
@@ -2235,7 +2238,7 @@ class SeriesDetailsView(QWidget):
             return
         is_fav = bool(self.channel.is_favorite)
         if is_fav:
-            self.fav_btn.setText("  Retirer des favoris")
+            self.fav_btn.setText("  " + tr("Retirer des favoris"))
             self.fav_btn.setIcon(get_icon("favorite", color="#f43f5e"))
             self.fav_btn.setIconSize(QSize(18, 18))
             self.fav_btn.setStyleSheet("""
@@ -2253,7 +2256,7 @@ class SeriesDetailsView(QWidget):
                 }
             """)
         else:
-            self.fav_btn.setText("  Ajouter aux favoris")
+            self.fav_btn.setText("  " + tr("Ajouter aux favoris"))
             self.fav_btn.setIcon(get_icon("favorite_border", color="#f43f5e"))
             self.fav_btn.setIconSize(QSize(18, 18))
             self.fav_btn.setStyleSheet("""
@@ -2306,11 +2309,17 @@ class SeriesDetailsView(QWidget):
     def retranslate_ui(self):
         """Met à jour les libellés de la fiche série."""
         if hasattr(self, "back_btn"):
-            self.back_btn.setToolTip(tr("Retour"))
+            self.back_btn.setToolTip(tr("Retour à la galerie de séries"))
+        if hasattr(self, "nav_tag"):
+            self.nav_tag.setText(tr("FICHE DE LA SÉRIE"))
         if hasattr(self, "seasons_title_lbl"):
-            self.seasons_title_lbl.setText(tr("Saisons et Épisodes"))
-        if hasattr(self, "resume_btn") and self.resume_btn:
-            self.resume_btn.setText("  " + tr("Reprendre"))
-        if hasattr(self, "trailer_btn") and self.trailer_btn:
-            self.trailer_btn.setText("  " + tr("Bande-annonce"))
-
+            self.seasons_title_lbl.setText(tr("Saisons et épisodes"))
+        if hasattr(self, "trailer_title"):
+            self.trailer_title.setText(tr("Bande-annonce de la série"))
+        if hasattr(self, "play_trailer_btn"):
+            self.play_trailer_btn.setText("  " + tr("Lire la bande-annonce"))
+        if hasattr(self, "open_youtube_btn"):
+            self.open_youtube_btn.setText("  " + tr("Ouvrir sur YouTube"))
+        self._update_season_tab_buttons()
+        self._update_resume_button_text()
+        self._update_favorite_button()
