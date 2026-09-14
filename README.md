@@ -1,4 +1,4 @@
-﻿<p align="center">
+<p align="center">
   <img src="assets/logo.png" width="128" height="128" alt="IPTV Hub Logo">
 </p>
 
@@ -26,6 +26,53 @@
 
 > 💡 **Inspiration** : Le projet s'inspire directement de l'esthétique épurée, sombre et intuitive d’**[IPTVnator](https://github.com/4viur/iptvnator)**.  
 > Contrairement aux lecteurs basés sur Electron ou Chromium, **IPTV Hub** a été développé en **Python 3 et Qt6**, avec un moteur de décodage matériel direct s'appuyant sur **`libmpv`** et **OpenGL**. Il en résulte une consommation de mémoire minimale, des temps de démarrage instantanés et une fluidité totale de lecture jusqu'en 4K 60fps.
+
+---
+
+## 📸 Aperçu de l'application
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Tableau de bord IPTV Hub" width="95%">
+  <br>
+  <em>Tableau de bord moderne : reprise de lecture en un clic, affiches haute définition et favoris</em>
+</p>
+
+<br>
+
+<table align="center" width="100%">
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/live.png" alt="Télévision en Direct" width="100%">
+      <br>
+      <b>📺 TV en Direct : lecteur libmpv, chaînes et guide en temps réel</b>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/epg.png" alt="Guide TV Chronologique" width="100%">
+      <br>
+      <b>📅 Guide Électronique des Programmes (EPG Grid)</b>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/vod.png" alt="Films VOD" width="100%">
+      <br>
+      <b>🎬 Films VOD : affiches officielles TMDB, notes et badges qualité</b>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/series.png" alt="Séries TV" width="100%">
+      <br>
+      <b>🍿 Séries TV : navigation par groupe et fiches détaillées</b>
+    </td>
+  </tr>
+</table>
+
+<br>
+
+<p align="center">
+  <img src="docs/screenshots/series_detail.png" alt="Détail d'une série et épisodes" width="95%">
+  <br>
+  <em>Fiche détaillée d'une série : sélecteur de saisons, épisodes et badges de progression de visionnage</em>
+</p>
 
 ---
 
