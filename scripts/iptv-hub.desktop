@@ -1,0 +1,16 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=IPTV Hub
+GenericName=Lecteur IPTV
+GenericName[fr]=Lecteur IPTV
+Comment=Lecteur moderne de télévision en direct, films et séries IPTV (Qt6 + libmpv)
+Comment[fr]=Lecteur moderne de télévision en direct, films et séries IPTV
+Exec=iptv-hub
+Icon=iptv-hub
+Terminal=false
+Categories=AudioVideo;Video;Player;TV;
+Keywords=iptv;tv;m3u;stream;player;series;movies;xtream;television;tele;video;
+Keywords[fr]=iptv;tv;m3u;stream;lecteur;series;films;xtream;television;tele;video;
+StartupWMClass=IPTV Hub
+MimeType=x-scheme-handler/iptv;
