@@ -14,6 +14,7 @@ from PyQt6.QtGui import QCursor
 
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
 from core.models import clean_category_display_name
+from core.i18n import tr
 
 
 class CategoryItemWidget(QFrame):
@@ -299,10 +300,10 @@ class CategoriesPanel(QFrame):
             }
         """)
 
-        a_default = menu.addAction("📌 Ordre du serveur (Original)")
-        a_az = menu.addAction("🔤 Nom (A → Z)")
-        a_za = menu.addAction("🔤 Nom (Z → A)")
-        a_count = menu.addAction("📊 Nombre de chaînes (décroissant)")
+        a_default = menu.addAction("📌 " + tr("Ordre original"))
+        a_az = menu.addAction("🔤 " + tr("Nom (A-Z)"))
+        a_za = menu.addAction("🔤 " + tr("Nom (Z-A)"))
+        a_count = menu.addAction("📊 " + tr("Nombre de chaînes (Décroissant)"))
 
         a_default.setCheckable(True)
         a_az.setCheckable(True)
@@ -327,7 +328,7 @@ class CategoriesPanel(QFrame):
 
     def _show_filter_menu(self):
         menu = QMenu(self)
-        a_all = menu.addAction("Toutes les catégories")
+        a_all = menu.addAction(tr("Toutes les catégories"))
         a_non_empty = menu.addAction("Uniquement catégories avec chaînes")
 
         a_all.triggered.connect(lambda: self._render_categories())
@@ -336,4 +337,12 @@ class CategoriesPanel(QFrame):
 
     def _filter_non_empty(self):
         self._all_categories = [(n, c) for n, c in self._all_categories if c > 0]
+        self._render_categories()
+
+    def retranslate_ui(self):
+        """Met à jour les textes, placeholders et infobulles de CategoriesPanel."""
+        self.search_btn.setToolTip(tr("Filtrer les catégories..."))
+        self.sort_btn.setToolTip(tr("Trier par :"))
+        self.filter_btn.setToolTip(tr("Gérer les catégories"))
+        self.search_edit.setPlaceholderText(tr("Filtrer les catégories..."))
         self._render_categories()

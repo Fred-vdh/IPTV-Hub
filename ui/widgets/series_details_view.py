@@ -24,6 +24,7 @@ from core.xtream_client import XtreamClient
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from ui.widgets.rounded_poster import RoundedPosterLabel
+from core.i18n import tr
 
 
 # Cache mémoire des informations de séries pour un affichage instantané (0ms) lors de la navigation
@@ -2301,4 +2302,15 @@ class SeriesDetailsView(QWidget):
             artist_name = link[len("artist:"):].strip()
             if artist_name:
                 self.artist_clicked.emit(artist_name)
+
+    def retranslate_ui(self):
+        """Met à jour les libellés de la fiche série."""
+        if hasattr(self, "back_btn"):
+            self.back_btn.setToolTip(tr("Retour"))
+        if hasattr(self, "seasons_title_lbl"):
+            self.seasons_title_lbl.setText(tr("Saisons et Épisodes"))
+        if hasattr(self, "resume_btn") and self.resume_btn:
+            self.resume_btn.setText("  " + tr("Reprendre"))
+        if hasattr(self, "trailer_btn") and self.trailer_btn:
+            self.trailer_btn.setText("  " + tr("Bande-annonce"))
 

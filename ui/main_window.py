@@ -37,6 +37,7 @@ from ui.widgets.dashboard_view import DashboardView
 from ui.widgets.epg_grid_view import EPGGridView
 from ui.widgets.replay_view import ReplayView
 from ui.icons import get_app_logo_icon, get_icon
+from core.i18n import tr, I18nManager
 
 
 class MainWindow(QMainWindow):
@@ -138,6 +139,12 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._connect_signals()
         self._setup_shortcuts()
+
+        # Initialisation de la langue de l'application
+        saved_lang = getattr(self.settings, "app_language", "fr")
+        I18nManager.instance().set_language(saved_lang)
+        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
+
         self._update_search_placeholder(self.current_section)
         self._load_initial_data()
 
@@ -3076,3 +3083,55 @@ class MainWindow(QMainWindow):
 
         self.player_controller.cleanup()
         event.accept()
+
+    def retranslate_ui(self):
+        """Met à jour l'ensemble des textes de l'interface en temps réel lors d'un changement de langue."""
+        self.setWindowTitle("IPTV Hub — " + tr("IPTV Hub"))
+
+        if hasattr(self, "title_bar") and hasattr(self.title_bar, "retranslate_ui"):
+            self.title_bar.retranslate_ui()
+
+        if hasattr(self, "sidebar") and hasattr(self.sidebar, "retranslate_ui"):
+            self.sidebar.retranslate_ui()
+
+        if hasattr(self, "categories_panel") and hasattr(self.categories_panel, "retranslate_ui"):
+            self.categories_panel.retranslate_ui()
+
+        if hasattr(self, "channel_list_panel") and hasattr(self.channel_list_panel, "retranslate_ui"):
+            self.channel_list_panel.retranslate_ui()
+
+        if hasattr(self, "settings_view") and hasattr(self.settings_view, "retranslate_ui"):
+            self.settings_view.retranslate_ui()
+
+        if hasattr(self, "vod_grid_view") and hasattr(self.vod_grid_view, "retranslate_ui"):
+            self.vod_grid_view.retranslate_ui()
+
+        if hasattr(self, "series_grid_view") and hasattr(self.series_grid_view, "retranslate_ui"):
+            self.series_grid_view.retranslate_ui()
+
+        if hasattr(self, "dashboard_view") and hasattr(self.dashboard_view, "retranslate_ui"):
+            self.dashboard_view.retranslate_ui()
+
+        if hasattr(self, "epg_grid_view") and hasattr(self.epg_grid_view, "retranslate_ui"):
+            self.epg_grid_view.retranslate_ui()
+
+        if hasattr(self, "replay_view") and hasattr(self.replay_view, "retranslate_ui"):
+            self.replay_view.retranslate_ui()
+
+        if hasattr(self, "favorites_view") and hasattr(self.favorites_view, "retranslate_ui"):
+            self.favorites_view.retranslate_ui()
+
+        if hasattr(self, "history_view") and hasattr(self.history_view, "retranslate_ui"):
+            self.history_view.retranslate_ui()
+
+        if hasattr(self, "recently_added_view") and hasattr(self.recently_added_view, "retranslate_ui"):
+            self.recently_added_view.retranslate_ui()
+
+        if hasattr(self, "movie_details_view") and hasattr(self.movie_details_view, "retranslate_ui"):
+            self.movie_details_view.retranslate_ui()
+
+        if hasattr(self, "series_details_view") and hasattr(self.series_details_view, "retranslate_ui"):
+            self.series_details_view.retranslate_ui()
+
+        self._update_search_placeholder(self.current_section)
+

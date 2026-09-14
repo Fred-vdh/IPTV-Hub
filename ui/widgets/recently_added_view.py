@@ -20,6 +20,7 @@ from core.database import Database
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from ui.widgets.poster_utils import draw_added_date_badge
+from core.i18n import tr
 
 
 FRENCH_MONTHS = [
@@ -652,3 +653,13 @@ class RecentlyAddedView(QWidget):
             limit=30
         )
         self.live_carousel.set_channels(live)
+
+    def retranslate_ui(self):
+        """Met à jour les textes des carrousels de RecentlyAddedView."""
+        if hasattr(self, "movies_carousel") and hasattr(self.movies_carousel, "title_label"):
+            self.movies_carousel.title_label.setText(tr("Films récemment ajoutés"))
+        if hasattr(self, "series_carousel") and hasattr(self.series_carousel, "title_label"):
+            self.series_carousel.title_label.setText(tr("Séries récemment ajoutées"))
+        if hasattr(self, "live_carousel") and hasattr(self.live_carousel, "title_label"):
+            self.live_carousel.title_label.setText(tr("TV en direct"))
+        self.refresh_view()

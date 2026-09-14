@@ -1956,6 +1956,8 @@ class Database:
                 settings.sync_last_timestamp = data["sync_last_timestamp"]
             if "auto_play_next_episode" in data:
                 settings.auto_play_next_episode = data["auto_play_next_episode"].lower() == "true"
+            if "app_language" in data:
+                settings.app_language = data["app_language"]
             return settings
 
     def save_settings(self, settings: AppSettings):
@@ -1993,6 +1995,7 @@ class Database:
                 "sync_folder": settings.sync_folder,
                 "sync_last_timestamp": settings.sync_last_timestamp,
                 "auto_play_next_episode": str(settings.auto_play_next_episode),
+                "app_language": settings.app_language,
             }
             for k, v in data.items():
                 cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, v))

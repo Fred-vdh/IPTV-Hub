@@ -23,6 +23,7 @@ from core.models import Channel, EPGProgram
 from core.database import Database
 from core.image_loader import ImageLoader
 from ui.icons import get_icon, get_pixmap
+from core.i18n import tr
 
 ROW_HEIGHT = 58
 CHANNEL_COL_WIDTH = 220
@@ -1213,3 +1214,14 @@ class EPGGridView(QFrame):
         mins_now = now.hour * 60 + now.minute
         target_x = max(0, int((mins_now - 25) * self.px_per_minute))
         self.grid_scroll.horizontalScrollBar().setValue(target_x)
+
+    def retranslate_ui(self):
+        """Met à jour les textes, boutons et placeholders d'EPGGridView."""
+        if hasattr(self, "hero_card") and hasattr(self.hero_card, "play_btn"):
+            self.hero_card.play_btn.setText(" " + tr("Lecture"))
+        if hasattr(self, "search_input"):
+            self.search_input.setPlaceholderText(tr("Rechercher dans le guide TV..."))
+        if hasattr(self, "now_btn"):
+            self.now_btn.setText(" " + tr("En direct maintenant"))
+        if hasattr(self, "_build_date_buttons"):
+            self._build_date_buttons()

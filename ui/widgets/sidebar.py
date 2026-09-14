@@ -196,3 +196,18 @@ class Sidebar(QFrame):
             btn.repaint()
         self.repaint()
 
+    def retranslate_ui(self):
+        """Met à jour les infobulles de tous les boutons de la barre latérale selon la langue active."""
+        from core.i18n import tr
+        self.btn_dashboard.setToolTip(tr("Tableau de bord"))
+        self.btn_favorites.setToolTip(tr("Favoris globaux"))
+        self.btn_history.setToolTip(tr("Récemment regardé"))
+        self.btn_epg.setToolTip(tr("Guide des programmes (EPG)"))
+        self.btn_replay.setToolTip(tr("TV Replay (Rattrapage)"))
+        self.btn_live.setToolTip(tr("TV en direct"))
+        self.btn_vod.setToolTip(tr("Films (VOD)"))
+        self.btn_series.setToolTip(tr("Séries"))
+        self.btn_recent_added.setToolTip(tr("Récemment ajoutés (TV, VOD, Séries)"))
+        self.btn_manage_pl.setToolTip(tr("Gérer les listes de lecture"))
+        self.btn_settings.setToolTip(tr("Paramètres de l'application"))
+

@@ -230,6 +230,7 @@ class AppSettings:
     sync_folder: str = ""
     sync_last_timestamp: str = ""
     auto_play_next_episode: bool = True
+    app_language: str = "fr"
 
 def clean_category_display_name(name: str) -> str:
     """

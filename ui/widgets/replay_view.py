@@ -18,6 +18,7 @@ from core.database import Database
 from core.xtream_client import XtreamClient
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
+from core.i18n import tr
 
 
 class _ReplayEpgWorker(QThread):
@@ -707,3 +708,10 @@ class ReplayView(QWidget):
     def closeEvent(self, event):
         self.stop_workers()
         super().closeEvent(event)
+
+    def retranslate_ui(self):
+        """Met à jour les textes et libellés du Replay."""
+        if hasattr(self, "search_input"):
+            self.search_input.setPlaceholderText(tr("Rechercher dans le Replay..."))
+        if hasattr(self, "header_title"):
+            self.header_title.setText(tr("TV Replay (Rattrapage)"))

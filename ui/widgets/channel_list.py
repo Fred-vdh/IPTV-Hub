@@ -18,6 +18,7 @@ from core.image_loader import ImageLoader
 from ui.widgets.channel_model import ChannelListModel
 from ui.widgets.channel_delegate import ChannelItemDelegate
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
+from core.i18n import tr
 
 
 class ChannelListPanel(QFrame):
@@ -243,9 +244,9 @@ class ChannelListPanel(QFrame):
             }
         """)
 
-        a_default = menu.addAction("📌 Ordre du serveur (Original)")
-        a_az = menu.addAction("🔤 Nom (A → Z)")
-        a_za = menu.addAction("🔤 Nom (Z → A)")
+        a_default = menu.addAction("📌 " + tr("Ordre original"))
+        a_az = menu.addAction("🔤 " + tr("Nom (A-Z)"))
+        a_za = menu.addAction("🔤 " + tr("Nom (Z-A)"))
 
         a_default.setCheckable(True)
         a_az.setCheckable(True)
@@ -290,12 +291,20 @@ class ChannelListPanel(QFrame):
             return
 
         menu = QMenu(self)
-        fav_text = "Retirer des favoris" if channel.is_favorite else "Ajouter aux favoris"
+        fav_text = tr("Retirer des favoris") if channel.is_favorite else tr("Ajouter aux favoris")
         fav_icon = get_icon("favorite_border" if channel.is_favorite else "favorite", color="#f43f5e")
         act_fav = menu.addAction(fav_icon, fav_text)
         act_fav.triggered.connect(lambda: self.model.toggle_favorite(index.row()))
 
-        act_epg = menu.addAction(get_icon("calendar_today", color="#818cf8"), "Voir le guide TV (EPG)")
+        act_epg = menu.addAction(get_icon("calendar_today", color="#818cf8"), tr("Guide des programmes (EPG)"))
         act_epg.triggered.connect(lambda: self.view_epg_requested.emit(channel))
 
         menu.exec(QCursor.pos())
+
+    def retranslate_ui(self):
+        """Met à jour les infobulles, placeholders et titres de ChannelListPanel."""
+        self.sort_az_btn.setToolTip(tr("Trier par :"))
+        self.search_input.setPlaceholderText(tr("Filtrer les chaînes..."))
+        if self.current_selected_category in ("Toutes les chaînes", "All channels", ""):
+            self.cat_title_label.setText(tr("Toutes les catégories"))
+

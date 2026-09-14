@@ -21,6 +21,7 @@ from core.database import Database
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from ui.widgets.poster_utils import draw_added_date_badge
+from core.i18n import tr
 
 
 FRENCH_MONTHS = [
@@ -695,3 +696,17 @@ class RecentlyWatchedView(QWidget):
                 col = i % cols
                 self.grid_layout.removeWidget(card)
                 self.grid_layout.addWidget(card, row, col)
+
+    def retranslate_ui(self):
+        """Met à jour les textes des onglets et boutons de RecentlyWatchedView."""
+        if hasattr(self, "header_title"):
+            self.header_title.setText(tr("Historique de lecture"))
+        if hasattr(self, "btn_live"):
+            self.btn_live.setText(tr("Chaînes TV"))
+        if hasattr(self, "btn_movies"):
+            self.btn_movies.setText(tr("Films"))
+        if hasattr(self, "btn_series"):
+            self.btn_series.setText(tr("Séries"))
+        if hasattr(self, "clear_btn"):
+            self.clear_btn.setText(" " + tr("Effacer l'historique"))
+        self.refresh_view()

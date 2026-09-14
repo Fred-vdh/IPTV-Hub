@@ -59,9 +59,9 @@ class CustomTitleBar(QWidget):
         layout.addWidget(sep_v)
 
         # Menu déroulant des listes de lecture
-        pl_label = QLabel("Liste :")
-        pl_label.setStyleSheet("color: #94a3b8; font-weight: 600; font-size: 12px;")
-        layout.addWidget(pl_label)
+        self.pl_label = QLabel("Liste :")
+        self.pl_label.setStyleSheet("color: #94a3b8; font-weight: 600; font-size: 12px;")
+        layout.addWidget(self.pl_label)
 
         self.playlist_combo = QComboBox()
         self.playlist_combo.setMinimumWidth(200)
@@ -154,20 +154,35 @@ class CustomTitleBar(QWidget):
 
     def set_category_placeholder(self, section_id: str):
         """Adapte le placeholder de recherche selon la catégorie active."""
+        from core.i18n import tr
+        self._current_section_id = section_id
         placeholders = {
-            "dashboard": "Rechercher sur le tableau de bord...",
-            "favorites": "Favoris | Filtrer cette section...",
-            "history": "Rechercher dans l'historique...",
-            "live": "Rechercher une chaîne en direct...",
-            "vod": "Rechercher un film (VOD)...",
-            "series": "Rechercher une série...",
-            "recently_added": "Rechercher parmi les récents ajouts...",
-            "epg": "Rechercher dans le guide TV...",
-            "replay": "Rechercher dans le Replay...",
-            "settings": "Rechercher...",
+            "dashboard": tr("Rechercher sur le tableau de bord..."),
+            "favorites": tr("Favoris | Filtrer cette section..."),
+            "history": tr("Rechercher dans l'historique..."),
+            "live": tr("Rechercher une chaîne en direct..."),
+            "vod": tr("Rechercher un film (VOD)..."),
+            "series": tr("Rechercher une série..."),
+            "recently_added": tr("Rechercher parmi les récents ajouts..."),
+            "epg": tr("Rechercher dans le guide TV..."),
+            "replay": tr("Rechercher dans le Replay..."),
+            "settings": tr("Rechercher..."),
         }
-        text = placeholders.get(section_id, "Rechercher...")
+        text = placeholders.get(section_id, tr("Rechercher..."))
         self.search_box.setPlaceholderText(text)
+
+    def retranslate_ui(self):
+        """Met à jour les libellés, infobulles et placeholder de la barre de titre."""
+        from core.i18n import tr
+        if hasattr(self, "pl_label"):
+            self.pl_label.setText(tr("Liste :"))
+        self.refresh_btn.setToolTip(tr("Rafraîchir les chaînes de la liste active"))
+        self.add_btn.setToolTip(tr("Ajouter une liste de lecture"))
+        self.min_btn.setToolTip(tr("Réduire"))
+        self.max_btn.setToolTip(tr("Agrandir / Restaurer"))
+        self.close_btn.setToolTip(tr("Fermer"))
+        current_sec = getattr(self, "_current_section_id", "dashboard")
+        self.set_category_placeholder(current_sec)
 
     def set_maximized_icon(self, is_max: bool):
         """Change l'icône du bouton agrandir/restaurer."""

@@ -29,6 +29,7 @@ from core.models import Channel, Playlist, parse_movie_metadata
 from core.xtream_client import XtreamClient
 from ui.icons import get_icon
 from ui.widgets.rounded_poster import RoundedPosterLabel
+from core.i18n import tr
 
 
 def _fmt(seconds: float) -> str:
@@ -1303,3 +1304,17 @@ class MovieDetailsView(QWidget):
             artist_name = link[len("artist:"):].strip()
             if artist_name:
                 self.artist_clicked.emit(artist_name)
+
+    def retranslate_ui(self):
+        """Met à jour les libellés de la fiche film."""
+        if hasattr(self, "back_btn"):
+            self.back_btn.setToolTip(tr("Retour"))
+        if hasattr(self, "play_btn"):
+            is_resume = getattr(self, "_resume_pos", 0.0) > 0.0
+            self.play_btn.setText("  " + (tr("Reprendre") if is_resume else tr("Lecture")))
+        if hasattr(self, "trailer_btn"):
+            self.trailer_btn.setText("  " + tr("Bande-annonce"))
+        if hasattr(self, "restart_btn"):
+            self.restart_btn.setText("  " + tr("Ordre original"))
+        if hasattr(self, "_update_fav_btn"):
+            self._update_fav_btn()

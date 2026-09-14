@@ -27,6 +27,7 @@ from core.models import Channel, Playlist, parse_movie_metadata
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from ui.widgets.poster_utils import draw_added_date_badge
+from core.i18n import tr
 
 
 class BackdropFetchThread(QThread):
@@ -1311,5 +1312,30 @@ class DashboardView(QWidget):
                     self.hero_banner.setVisible(True)
                 else:
                     self.hero_banner.setVisible(q in hero_ch.name.lower())
+
+    def retranslate_ui(self):
+        """Met à jour les textes et en-têtes du tableau de bord."""
+        if hasattr(self, "hero_banner"):
+            if hasattr(self.hero_banner, "btn_resume"):
+                self.hero_banner.btn_resume.setText("  " + tr("Reprendre la lecture"))
+            if not getattr(self.hero_banner, "channel", None):
+                self.hero_banner.title_label.setText(tr("Aucun média en cours") if hasattr(tr, "__call__") else "Aucun média en cours")
+
+        see_all_str = tr("Voir tout") + " >"
+        if hasattr(self, "sec_continue"):
+            self.sec_continue.title_label.setText(tr("Reprendre la lecture"))
+            self.sec_continue.set_see_all_text(see_all_str)
+
+        if hasattr(self, "sec_recent_live"):
+            self.sec_recent_live.title_label.setText(tr("TV en direct"))
+            self.sec_recent_live.set_see_all_text(see_all_str)
+
+        if hasattr(self, "sec_favs"):
+            self.sec_favs.title_label.setText(tr("Vos Favoris"))
+            self.sec_favs.set_see_all_text(see_all_str)
+
+        if hasattr(self, "sec_recents"):
+            self.sec_recents.title_label.setText(tr("Récemment ajoutés"))
+            self.sec_recents.set_see_all_text(see_all_str)
 
 

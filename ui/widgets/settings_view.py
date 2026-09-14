@@ -20,6 +20,7 @@ from core.sync_manager import (
     export_config_to_file,
     import_config_from_file,
 )
+from core.i18n import tr, I18nManager
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
 
 
@@ -55,9 +56,9 @@ class SettingsView(QWidget):
         title_row.setContentsMargins(18, 16, 18, 14)
         title_row.setSpacing(8)
 
-        nav_title = QLabel("Paramètres")
-        nav_title.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
-        title_row.addWidget(nav_title)
+        self.nav_title = QLabel("Paramètres")
+        self.nav_title.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
+        title_row.addWidget(self.nav_title)
         title_row.addStretch()
 
         nav_layout.addLayout(title_row)
@@ -85,14 +86,14 @@ class SettingsView(QWidget):
         nav_layout.addStretch()
 
         # Bouton fermer/retour
-        close_btn = QPushButton("  Fermer les paramètres")
-        close_btn.setIcon(get_icon("close", color=DEFAULT_ICON_COLOR))
-        close_btn.setIconSize(QSize(16, 16))
-        close_btn.setProperty("class", "secondary-btn")
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet("margin: 8px 14px;")
-        close_btn.clicked.connect(self.close_requested.emit)
-        nav_layout.addWidget(close_btn)
+        self.close_btn = QPushButton("  Fermer les paramètres")
+        self.close_btn.setIcon(get_icon("close", color=DEFAULT_ICON_COLOR))
+        self.close_btn.setIconSize(QSize(16, 16))
+        self.close_btn.setProperty("class", "secondary-btn")
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.setStyleSheet("margin: 8px 14px;")
+        self.close_btn.clicked.connect(self.close_requested.emit)
+        nav_layout.addWidget(self.close_btn)
 
         root_layout.addWidget(nav_panel)
 
@@ -204,9 +205,23 @@ class SettingsView(QWidget):
             "Personnalisez l'affichage, le comportement au démarrage et l'interface utilisateur."
         )
 
+        # Langue de l'application
+        r_app_lang = QHBoxLayout()
+        self.lbl_app_lang = QLabel("Langue de l'application :")
+        r_app_lang.addWidget(self.lbl_app_lang)
+        r_app_lang.addStretch()
+        self.app_lang_combo = QComboBox()
+        self.app_lang_combo.addItem("Français", "fr")
+        self.app_lang_combo.addItem("English", "en")
+        self.app_lang_combo.setFixedWidth(240)
+        self.app_lang_combo.currentIndexChanged.connect(self._on_app_lang_changed)
+        r_app_lang.addWidget(self.app_lang_combo)
+        c_layout.addLayout(r_app_lang)
+
         # Thème
         r1 = QHBoxLayout()
-        r1.addWidget(QLabel("Thème de l'interface :"))
+        self.lbl_theme = QLabel("Thème de l'interface :")
+        r1.addWidget(self.lbl_theme)
         r1.addStretch()
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(["Gris foncé bleuté (Par défaut)", "Sombre moderne"])
@@ -679,6 +694,21 @@ class SettingsView(QWidget):
                 break
         self.hwdec_combo.setCurrentIndex(idx)
 
+        # Langue de l'application
+        app_lang = getattr(self.settings, "app_language", "fr")
+        for i in range(self.app_lang_combo.count()):
+            if self.app_lang_combo.itemData(i) == app_lang:
+                self.app_lang_combo.blockSignals(True)
+                self.app_lang_combo.setCurrentIndex(i)
+                self.app_lang_combo.blockSignals(False)
+                break
+
+    def _on_app_lang_changed(self, index: int):
+        lang_code = self.app_lang_combo.itemData(index)
+        if lang_code:
+            self.settings.app_language = lang_code
+            I18nManager.instance().set_language(lang_code)
+
     def _save_settings(self):
         self.settings.user_agent = self.ua_edit.text().strip() or "Mozilla/5.0"
         self.settings.buffer_size_mb = self.buffer_spin.value()
@@ -686,6 +716,7 @@ class SettingsView(QWidget):
         self.settings.download_dir = self.download_dir_edit.text().strip()
         self.settings.preferred_audio_lang = self.audio_lang_combo.currentData() or ""
         self.settings.auto_play_next_episode = self.auto_play_next_cb.isChecked()
+        self.settings.app_language = self.app_lang_combo.currentData() or "fr"
 
         # hwdec
         hw_txt = self.hwdec_combo.currentText().split()[0]
@@ -695,7 +726,7 @@ class SettingsView(QWidget):
         self.settings.deinterlace = deint_txt
 
         self.db.save_settings(self.settings)
-        self.save_status.setText("✓ Paramètres enregistrés avec succès !")
+        self.save_status.setText("✓ " + tr("Paramètres enregistrés"))
         self.settings_saved.emit()
 
     def _clear_logo_cache(self):
@@ -709,3 +740,34 @@ class SettingsView(QWidget):
             QMessageBox.information(self, "Cache vidé", "Le cache des logos a été nettoyé avec succès.")
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Impossible de vider le cache : {e}")
+
+    def retranslate_ui(self):
+        """Met à jour les textes des onglets, en-têtes et boutons de SettingsView."""
+        if hasattr(self, "nav_title"):
+            self.nav_title.setText(tr("Paramètres"))
+        if hasattr(self, "close_btn"):
+            self.close_btn.setText("  " + tr("Fermer les paramètres"))
+        if hasattr(self, "save_btn"):
+            self.save_btn.setText(" " + tr("Enregistrer les paramètres"))
+
+        # Boutons de navigation
+        if hasattr(self, "btn_general"):
+            self.btn_general.setText("  " + tr("Général & Interface"))
+        if hasattr(self, "btn_player"):
+            self.btn_player.setText("  " + tr("Lecteur Vidéo"))
+        if hasattr(self, "btn_network"):
+            self.btn_network.setText("  " + tr("Réseau & Flux"))
+        if hasattr(self, "btn_epg"):
+            self.btn_epg.setText("  " + tr("Guide EPG"))
+        if hasattr(self, "btn_storage"):
+            self.btn_storage.setText("  " + tr("Données & Stockage"))
+        if hasattr(self, "btn_backup"):
+            self.btn_backup.setText("  " + tr("Sauvegarde & Fichiers"))
+        if hasattr(self, "btn_about"):
+            self.btn_about.setText("  " + tr("À propos"))
+
+        # Labels de la page générale
+        if hasattr(self, "lbl_app_lang"):
+            self.lbl_app_lang.setText(tr("Langue de l'application :"))
+        if hasattr(self, "lbl_theme"):
+            self.lbl_theme.setText(tr("Thème de l'interface :"))

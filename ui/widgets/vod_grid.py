@@ -16,6 +16,7 @@ from core.database import Database
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from ui.widgets.poster_utils import draw_added_date_badge
+from core.i18n import tr
 
 # ==============================================================================
 # FONCTIONNALITÉ EXPÉRIMENTALE : RECHERCHE PAR ACTEUR / RÉALISATEUR (OPTION 3)
@@ -1128,3 +1129,36 @@ class VODGridView(QWidget):
                     self.grid_layout.addWidget(w, row, col, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
             finally:
                 self.grid_container.setUpdatesEnabled(True)
+
+    def retranslate_ui(self):
+        """Met à jour les libellés de la barre d'outils, du combo de tri et du bouton artiste."""
+        if self.stream_type == "series":
+            if not self.current_category or self.current_category in ("Toutes les séries", "All series"):
+                self.category_title_label.setText(tr("TOUTES LES SÉRIES"))
+            self.items_count_label.setText(f"{self.total_items} " + (tr("séries") if self.total_items > 1 else tr("série")))
+        else:
+            if not self.current_category or self.current_category in ("Tous les films", "All movies"):
+                self.category_title_label.setText(tr("TOUS LES FILMS"))
+            self.items_count_label.setText(f"{self.total_items} " + (tr("films") if self.total_items > 1 else tr("film")))
+
+        curr_idx = self.sort_combo.currentIndex()
+        self.sort_combo.blockSignals(True)
+        self.sort_combo.clear()
+        self.sort_combo.addItems([
+            tr("Trier par :") + " " + tr("Par défaut (Serveur)"),
+            tr("Trier par :") + " " + tr("Plus récents d'abord"),
+            tr("Trier par :") + " " + tr("Nom (A-Z)"),
+            tr("Trier par :") + " " + tr("Nom (Z-A)"),
+            tr("Trier par :") + " " + tr("Mieux notés"),
+            tr("Trier par :") + " " + tr("Année (Plus récent)")
+        ])
+        if 0 <= curr_idx < self.sort_combo.count():
+            self.sort_combo.setCurrentIndex(curr_idx)
+        self.sort_combo.blockSignals(False)
+
+        if hasattr(self, "refine_btn"):
+            self.refine_btn.setText(" " + tr("Affiner les résultats"))
+        if hasattr(self, "artist_btn"):
+            self.artist_btn.setText(" " + tr("Recherche par artiste"))
+            self.artist_btn.setToolTip(tr("Acteur ou Réalisateur..."))
+
