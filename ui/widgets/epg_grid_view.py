@@ -249,6 +249,30 @@ class EPGHeroCard(QFrame):
         if self.channel:
             self.play_requested.emit(self.channel)
 
+    def retranslate_ui(self):
+        """Met à jour les libellés traduits de la fiche Hero EPG."""
+        self.play_btn.setText(" " + tr("Regarder la chaîne"))
+        self.status_badge.setText(tr("EN DIRECT"))
+        if not self.channel:
+            self.channel_name_lbl.setText(tr("Sélectionnez une émission"))
+            self.title_lbl.setText(tr("Aucun programme sélectionné"))
+            self.desc_lbl.setText(tr("Cliquez sur un programme dans la grille ci-dessous pour voir ses détails ou double-cliquez pour regarder la chaîne."))
+        else:
+            if not self.program:
+                self.title_lbl.setText(tr("Guide indisponible"))
+                self.desc_lbl.setText(tr("Aucune information de programme EPG trouvée pour {channel}.", channel=self.channel.name))
+            else:
+                st = normalize_to_naive_dt(self.program.start_time)
+                et = normalize_to_naive_dt(self.program.end_time)
+                if st and et:
+                    dur_mins = int((et - st).total_seconds() / 60)
+                    dur_str = f"{dur_mins // 60}h{dur_mins % 60:02d}" if dur_mins >= 60 else f"{dur_mins} min"
+                    dur_lbl = tr("Durée : {dur}", dur=dur_str)
+                    self.time_lbl.setText(f"{st.strftime('%H:%M')} - {et.strftime('%H:%M')}  •  {dur_lbl}")
+                if not self.program.description:
+                    self.desc_lbl.setText(tr("Aucun synopsis détaillé n'est fourni pour cette émission."))
+
+
 
 class EPGTimeHeaderCanvas(QWidget):
     """Bandeau temporel supérieur affichant les graduations d'heures."""
@@ -737,14 +761,17 @@ class EPGGridView(QFrame):
         """)
         self._init_ui()
 
+        from core.i18n import I18nManager
+        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
+
     def _init_ui(self):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(18, 16, 18, 16)
-        root_layout.setSpacing(12)
+        root_layout.setSpacing(10)
 
-        # 1. BARRE DE CONTRÔLES SUPÉRIEURE
-        ctrl_bar = QHBoxLayout()
-        ctrl_bar.setSpacing(12)
+        # 1. EN-TÊTE SUPÉRIEUR (LIGNE 1) : Titre à gauche, Catégories, Filtre, Recherche et Zoom à droite
+        header_row = QHBoxLayout()
+        header_row.setSpacing(12)
 
         title_box = QHBoxLayout()
         title_box.setSpacing(10)
@@ -752,15 +779,96 @@ class EPGGridView(QFrame):
         title_icon.setPixmap(get_pixmap("calendar_month", color="#60a5fa", size=24))
         title_icon.setFixedSize(24, 24)
         title_box.addWidget(title_icon)
-        self.title_lbl = QLabel(tr("Guide des Programmes (EPG)"))
+        self.title_lbl = QLabel(tr("Guide des programmes EPG"))
         self.title_lbl.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff;")
         title_box.addWidget(self.title_lbl)
-        ctrl_bar.addLayout(title_box)
+        header_row.addLayout(title_box)
+
+        header_row.addStretch()
+
+        self.cat_combo = QComboBox()
+        self.cat_combo.setMinimumWidth(180)
+        self.cat_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #1e2638;
+                color: #f8fafc;
+                border: 1px solid #33415c;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-size: 12px;
+            }
+        """)
+        self.cat_combo.currentIndexChanged.connect(self._on_category_changed)
+        header_row.addWidget(self.cat_combo)
+
+        self.filter_btn = QPushButton()
+        self.filter_btn.setFixedSize(30, 30)
+        self.filter_btn.setIcon(get_icon("filter_list", color="#cbd5e1"))
+        self.filter_btn.setIconSize(QSize(16, 16))
+        self.filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.filter_btn.setToolTip(tr("Gérer et filtrer les catégories et chaînes"))
+        self.filter_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1e2638;
+                border: 1px solid #33415c;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #2a374f;
+                border-color: #6366f1;
+            }
+        """)
+        self.filter_btn.clicked.connect(self.manage_categories_requested.emit)
+        header_row.addWidget(self.filter_btn)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(tr("Rechercher une chaîne..."))
+        self.search_input.setFixedWidth(200)
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1e2638;
+                color: #f8fafc;
+                border: 1px solid #33415c;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border-color: #6366f1;
+            }
+        """)
+        self.search_input.textChanged.connect(self._on_search_changed)
+        header_row.addWidget(self.search_input)
+
+        zoom_box = QHBoxLayout()
+        zoom_box.setSpacing(4)
+        self.zoom_out_btn = QPushButton("-")
+        self.zoom_out_btn.setFixedSize(26, 26)
+        self.zoom_out_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.zoom_out_btn.setToolTip(tr("Dézoomer la frise temporelle"))
+        self.zoom_out_btn.setStyleSheet("background-color: #1e2638; border: 1px solid #33415c; border-radius: 4px; color: #cbd5e1; font-weight: bold;")
+        self.zoom_out_btn.clicked.connect(lambda: self._adjust_zoom(-0.6))
+        zoom_box.addWidget(self.zoom_out_btn)
+
+        self.zoom_in_btn = QPushButton("+")
+        self.zoom_in_btn.setFixedSize(26, 26)
+        self.zoom_in_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.zoom_in_btn.setToolTip(tr("Zoomer la frise temporelle"))
+        self.zoom_in_btn.setStyleSheet("background-color: #1e2638; border: 1px solid #33415c; border-radius: 4px; color: #cbd5e1; font-weight: bold;")
+        self.zoom_in_btn.clicked.connect(lambda: self._adjust_zoom(0.6))
+        zoom_box.addWidget(self.zoom_in_btn)
+        header_row.addLayout(zoom_box)
+
+        root_layout.addLayout(header_row)
+
+        # 2. BARRE DE NAVIGATION TEMPORELLE (LIGNE 2) : 7 jours bien espacés + bouton Maintenant sous le titre
+        date_row = QHBoxLayout()
+        date_row.setSpacing(8)
 
         self.date_bar = QHBoxLayout()
-        self.date_bar.setSpacing(6)
+        self.date_bar.setSpacing(8)
         self._build_date_buttons()
-        ctrl_bar.addLayout(self.date_bar)
+        date_row.addLayout(self.date_bar)
 
         self.now_btn = QPushButton(" " + tr("Aller à maintenant"))
         self.now_btn.setIcon(get_icon("schedule", color="#60a5fa"))
@@ -782,84 +890,10 @@ class EPGGridView(QFrame):
             }
         """)
         self.now_btn.clicked.connect(self.scroll_to_now)
-        ctrl_bar.addWidget(self.now_btn)
+        date_row.addWidget(self.now_btn)
 
-        ctrl_bar.addStretch()
-
-        self.cat_combo = QComboBox()
-        self.cat_combo.setMinimumWidth(180)
-        self.cat_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #1e2638;
-                color: #f8fafc;
-                border: 1px solid #33415c;
-                border-radius: 6px;
-                padding: 5px 10px;
-                font-size: 12px;
-            }
-        """)
-        self.cat_combo.currentIndexChanged.connect(self._on_category_changed)
-        ctrl_bar.addWidget(self.cat_combo)
-
-        self.filter_btn = QPushButton()
-        self.filter_btn.setFixedSize(30, 30)
-        self.filter_btn.setIcon(get_icon("filter_list", color="#cbd5e1"))
-        self.filter_btn.setIconSize(QSize(16, 16))
-        self.filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.filter_btn.setToolTip(tr("Gérer et filtrer les catégories et chaînes"))
-        self.filter_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e2638;
-                border: 1px solid #33415c;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #2a374f;
-                border-color: #6366f1;
-            }
-        """)
-        self.filter_btn.clicked.connect(self.manage_categories_requested.emit)
-        ctrl_bar.addWidget(self.filter_btn)
-
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText(tr("Rechercher une chaîne..."))
-        self.search_input.setFixedWidth(200)
-        self.search_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #1e2638;
-                color: #f8fafc;
-                border: 1px solid #33415c;
-                border-radius: 6px;
-                padding: 5px 10px;
-                font-size: 12px;
-            }
-            QLineEdit:focus {
-                border-color: #6366f1;
-            }
-        """)
-        self.search_input.textChanged.connect(self._on_search_changed)
-        ctrl_bar.addWidget(self.search_input)
-
-        zoom_box = QHBoxLayout()
-        zoom_box.setSpacing(4)
-        zoom_out_btn = QPushButton("-")
-        zoom_out_btn.setFixedSize(26, 26)
-        zoom_out_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        zoom_out_btn.setToolTip(tr("Dézoomer la frise temporelle"))
-        zoom_out_btn.setStyleSheet("background-color: #1e2638; border: 1px solid #33415c; border-radius: 4px; color: #cbd5e1; font-weight: bold;")
-        zoom_out_btn.clicked.connect(lambda: self._adjust_zoom(-0.6))
-        zoom_box.addWidget(zoom_out_btn)
-
-        zoom_in_btn = QPushButton("+")
-        zoom_in_btn.setFixedSize(26, 26)
-        zoom_in_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        zoom_in_btn.setToolTip(tr("Zoomer la frise temporelle"))
-        zoom_in_btn.setStyleSheet("background-color: #1e2638; border: 1px solid #33415c; border-radius: 4px; color: #cbd5e1; font-weight: bold;")
-        zoom_in_btn.clicked.connect(lambda: self._adjust_zoom(0.6))
-        zoom_box.addWidget(zoom_in_btn)
-        ctrl_bar.addLayout(zoom_box)
-
-        root_layout.addLayout(ctrl_bar)
+        date_row.addStretch()
+        root_layout.addLayout(date_row)
 
         # 2. FICHE HERO DU PROGRAMME
         self.hero_card = EPGHeroCard(self)
@@ -1217,20 +1251,21 @@ class EPGGridView(QFrame):
     def retranslate_ui(self):
         """Met à jour les textes, boutons et placeholders d'EPGGridView."""
         if hasattr(self, "title_lbl"):
-            self.title_lbl.setText(tr("Guide des Programmes (EPG)"))
-        if hasattr(self, "hero_card") and hasattr(self.hero_card, "play_btn"):
-            self.hero_card.play_btn.setText(" " + tr("Regarder la chaîne"))
-            if not self.hero_card.channel:
-                self.hero_card.channel_name_lbl.setText(tr("Sélectionnez une émission"))
-                self.hero_card.title_lbl.setText(tr("Aucun programme sélectionné"))
-                self.hero_card.desc_lbl.setText(tr("Cliquez sur un programme dans la grille ci-dessous pour voir ses détails."))
+            self.title_lbl.setText(tr("Guide des programmes EPG"))
+        if hasattr(self, "hero_card") and hasattr(self.hero_card, "retranslate_ui"):
+            self.hero_card.retranslate_ui()
         if hasattr(self, "search_input"):
             self.search_input.setPlaceholderText(tr("Rechercher une chaîne..."))
         if hasattr(self, "now_btn"):
             self.now_btn.setText(" " + tr("Aller à maintenant"))
         if hasattr(self, "filter_btn"):
             self.filter_btn.setToolTip(tr("Gérer et filtrer les catégories et chaînes"))
+        if hasattr(self, "zoom_out_btn"):
+            self.zoom_out_btn.setToolTip(tr("Dézoomer la frise temporelle"))
+        if hasattr(self, "zoom_in_btn"):
+            self.zoom_in_btn.setToolTip(tr("Zoomer la frise temporelle"))
         if hasattr(self, "corner_lbl"):
             self.corner_lbl.setText(tr("CHAÎNES"))
         self._build_date_buttons()
         self._load_categories()
+

@@ -136,14 +136,14 @@ class MainWindow(QMainWindow):
         self._cursor_overridden = False
         self.setMouseTracking(True)
 
-        self._init_ui()
-        self._connect_signals()
-        self._setup_shortcuts()
-
-        # Initialisation de la langue de l'application
+        # Initialisation de la langue de l'application AVANT de construire l'UI
         saved_lang = getattr(self.settings, "app_language", "fr")
         I18nManager.instance().set_language(saved_lang)
         I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
+
+        self._init_ui()
+        self._connect_signals()
+        self._setup_shortcuts()
 
         self._update_search_placeholder(self.current_section)
         self._load_initial_data()

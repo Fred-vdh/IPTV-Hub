@@ -1277,7 +1277,7 @@ class DashboardView(QWidget):
         fav_vod_series = [c for c in fav_channels if c.stream_type in ("movie", "series")]
         self.sec_favs.clear_items()
         self.sec_favs.set_badge_count(len(fav_vod_series))
-        self.sec_favs.set_see_all_text(f"Voir les {len(fav_vod_series)} >" if fav_vod_series else "Voir tout >")
+        self.sec_favs.set_see_all_text(tr("Voir les {count} >", count=len(fav_vod_series)) if fav_vod_series else (tr("Voir tout") + " >"))
         if fav_vod_series:
             self.sec_favs.setVisible(True)
             for ch in fav_vod_series:

@@ -220,6 +220,48 @@ class TestI18n(unittest.TestCase):
             self.assertEqual(dash.sec_recent_live.title_label.text(), "Recently watched live TV")
             self.assertEqual(dash.sec_favs.title_label.text(), "Favorite movies & series")
             self.assertEqual(dash.sec_recents.title_label.text(), "Recently added on the playlist")
+        finally:
+            self.i18n.set_language("fr")
+            if os.path.exists(temp_db):
+                try:
+                    os.unlink(temp_db)
+                except Exception:
+                    pass
+
+    def test_epg_and_episode_translations(self):
+        """Vérifie la traduction dynamique des épisodes, du bouton voir tout et d'EPGGridView."""
+        from ui.widgets.epg_grid_view import EPGGridView
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            temp_db = f.name
+        try:
+            db = Database(temp_db)
+
+            # Test des clés formatées
+            self.i18n.set_language("fr")
+            self.assertEqual(tr("Voir les {count} >", count=30), "Voir les 30 >")
+            self.assertEqual(tr("Épisode {num}", num=12), "Épisode 12")
+            self.assertEqual(tr("Guide des programmes EPG"), "Guide des programmes EPG")
+            self.assertEqual(tr("Aller à maintenant"), "Aller à maintenant")
+            self.assertEqual(tr("Regarder la chaîne"), "Regarder la chaîne")
+
+            self.i18n.set_language("en")
+            self.assertEqual(tr("Voir les {count} >", count=30), "See all 30 >")
+            self.assertEqual(tr("Épisode {num}", num=12), "Episode 12")
+            self.assertEqual(tr("Guide des programmes EPG"), "TV Guide EPG")
+            self.assertEqual(tr("Aller à maintenant"), "Go to Now")
+            self.assertEqual(tr("Regarder la chaîne"), "Watch channel")
+
+            # Test du widget EPGGridView
+            self.i18n.set_language("fr")
+            epg = EPGGridView(db)
+            self.assertEqual(epg.title_lbl.text(), "Guide des programmes EPG")
+            self.assertIn("Aller à maintenant", epg.now_btn.text())
+            self.assertIn("Regarder la chaîne", epg.hero_card.play_btn.text())
+
+            self.i18n.set_language("en")
+            self.assertEqual(epg.title_lbl.text(), "TV Guide EPG")
+            self.assertIn("Go to Now", epg.now_btn.text())
+            self.assertIn("Watch channel", epg.hero_card.play_btn.text())
 
         finally:
             self.i18n.set_language("fr")
@@ -228,6 +270,7 @@ class TestI18n(unittest.TestCase):
                     os.unlink(temp_db)
                 except Exception:
                     pass
+
 
 
 if __name__ == "__main__":

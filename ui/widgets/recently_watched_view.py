@@ -21,7 +21,7 @@ from core.database import Database
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from ui.widgets.poster_utils import draw_added_date_badge
-from core.i18n import tr
+from core.i18n import tr, format_locale_date
 
 
 FRENCH_MONTHS = [
@@ -35,7 +35,7 @@ def format_watch_date(iso_str: Optional[str]) -> str:
     if not iso_str:
         return ""
     try:
-        from core.i18n import get_locale_weekday, get_locale_month
+        from core.i18n import get_locale_weekday
         dt = datetime.fromisoformat(iso_str)
         now = datetime.now()
         diff = now.date() - dt.date()
@@ -48,8 +48,7 @@ def format_watch_date(iso_str: Optional[str]) -> str:
             w_str = get_locale_weekday(dt.weekday())
             return f"{w_str}, {time_str}"
         else:
-            m_str = get_locale_month(dt.month, short=True)
-            return f"{dt.day} {m_str}, {time_str}"
+            return format_locale_date(dt, "friendly")
     except Exception:
         return ""
 
@@ -320,7 +319,8 @@ class RecentlyWatchedCardWidget(QWidget):
         # 3. Sous-titre (Episode, Catégorie ou Durée)
         subtitle = ""
         if self.item.get("episode_text"):
-            subtitle = f"Épisode {self.item['episode_text']}"
+            ep_t = str(self.item["episode_text"]).replace("Épisode", "").replace("Episode", "").strip()
+            subtitle = tr("Épisode {num}", num=ep_t)
         elif self.item.get("duration", 0) > 0 and self.item.get("playback_position", 0) > 0:
             pos_str = format_duration_short(self.item["playback_position"])
             dur_str = format_duration_short(self.item["duration"])

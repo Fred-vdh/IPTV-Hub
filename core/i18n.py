@@ -2490,6 +2490,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "fr": "Aucune liste de lecture",
         "en": "No playlist",
     },
+    "Guide des programmes EPG": {
+        "fr": "Guide des programmes EPG",
+        "en": "TV Guide EPG",
+    },
+    "Épisode précédent": {
+        "fr": "Épisode précédent",
+        "en": "Previous episode",
+    },
+    "Épisode suivant": {
+        "fr": "Épisode suivant",
+        "en": "Next episode",
+    },
 }
 
 

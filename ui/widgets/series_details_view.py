@@ -184,7 +184,7 @@ class EpisodeCardWidget(QWidget):
 
         # 3. Titre de l'épisode
         ep_num = self.episode.get("episode_num", 1)
-        raw_title = self.episode.get("title", f"Épisode {ep_num}")
+        raw_title = self.episode.get("title") or tr("Épisode {num}", num=ep_num)
         clean_title = raw_title.strip()
         if not clean_title.startswith(f"{ep_num}."):
             clean_title = f"{ep_num}. {clean_title}"
@@ -1988,7 +1988,7 @@ class SeriesDetailsView(QWidget):
         if action_type in ("resume", "continue") and target_ep:
             s_num = target_ep.get("_season", "1")
             e_num = target_ep.get("episode_num", 1)
-            raw_title = target_ep.get("title", f"Épisode {e_num}")
+            raw_title = target_ep.get("title") or tr("Épisode {num}", num=e_num)
             short_title = raw_title[:28] + "..." if len(raw_title) > 28 else raw_title
             try:
                 s_int = int(s_num)
@@ -2052,7 +2052,7 @@ class SeriesDetailsView(QWidget):
                 curr_ep_id = str(ep.get("id", ""))
                 curr_ext = str(ep.get("container_extension", "mp4")).strip(".") or "mp4"
                 curr_ep_num = ep.get("episode_num", 1)
-                curr_ep_title = ep.get("title", f"Épisode {curr_ep_num}").strip()
+                curr_ep_title = (ep.get("title") or tr("Épisode {num}", num=curr_ep_num)).strip()
                 curr_stream_url = client.get_episode_stream_url(curr_ep_id, container_extension=curr_ext)
 
                 ep_ch = Channel(
