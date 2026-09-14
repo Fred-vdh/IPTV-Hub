@@ -107,6 +107,7 @@ hiddenimports += [
     "core.sync_manager",
     "core.tmdb_client",
     "core.version",
+    "core.i18n",
     "core.xtream_client",
 ]
 
