@@ -8,7 +8,6 @@ import unittest
 from PyQt6.QtWidgets import QApplication
 
 from core.i18n import I18nManager, tr, TRANSLATIONS
-from core.models import AppSettings
 from core.database import Database
 
 
@@ -271,6 +270,80 @@ class TestI18n(unittest.TestCase):
                 except Exception:
                     pass
 
+    def test_vod_sort_settings_and_expiration_translations(self):
+        """Vérifie la traduction du tri Films/Séries, de la date d'expiration et des paramètres."""
+        from ui.widgets.vod_grid import VODGridView
+        from ui.widgets.settings_view import SettingsView
+        from ui.dialogs.manage_playlists_dialog import _format_exp_date
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            temp_db = f.name
+        try:
+            db = Database(temp_db)
+
+            # 1. Date d'expiration
+            future_ts = 1790000000  # un timestamp futur
+            self.i18n.set_language("fr")
+            exp_fr = _format_exp_date(str(future_ts))
+            self.i18n.set_language("en")
+            exp_en = _format_exp_date(str(future_ts))
+            self.assertIn("restants", exp_fr)
+            self.assertIn("remaining", exp_en)
+
+            # 2. Clés des paramètres
+            self.i18n.set_language("fr")
+            self.assertEqual(tr("Reprendre automatiquement la dernière chaîne au lancement"), "Reprendre automatiquement la dernière chaîne au lancement")
+            self.assertEqual(tr("Enchaîner automatiquement sur l'épisode suivant à la fin d'un épisode (Séries)"), "Enchaîner automatiquement sur l'épisode suivant à la fin d'un épisode (Séries)")
+            self.assertEqual(tr("Reconnexion automatique en cas de coupure de flux"), "Reconnexion automatique en cas de coupure de flux")
+            self.assertEqual(tr("Vider le cache des logos de chaînes"), "Vider le cache des logos de chaînes")
+            self.assertEqual(tr("Enregistrer la configuration sous..."), "Enregistrer la configuration sous...")
+            self.assertEqual(tr("Charger un fichier de configuration..."), "Charger un fichier de configuration...")
+            self.assertEqual(tr("auto (Recommandé)"), "auto (Recommandé)")
+            self.assertEqual(tr("Trier : Date d'ajout (plus récents...)"), "Trier : Date d'ajout (plus récents...)")
+
+            self.i18n.set_language("en")
+            self.assertEqual(tr("Reprendre automatiquement la dernière chaîne au lancement"), "Automatically resume last channel on startup")
+            self.assertEqual(tr("Enchaîner automatiquement sur l'épisode suivant à la fin d'un épisode (Séries)"), "Automatically play next episode when current episode finishes (Series)")
+            self.assertEqual(tr("Reconnexion automatique en cas de coupure de flux"), "Automatic reconnection if stream drops")
+            self.assertEqual(tr("Vider le cache des logos de chaînes"), "Clear channel logo cache")
+            self.assertEqual(tr("Enregistrer la configuration sous..."), "Save configuration as...")
+            self.assertEqual(tr("Charger un fichier de configuration..."), "Load configuration file...")
+            self.assertEqual(tr("auto (Recommandé)"), "auto (Recommended)")
+            self.assertEqual(tr("Trier : Date d'ajout (plus récents...)"), "Sort: Date added (Newest first)")
+
+            # 3. Widgets VODGridView & SettingsView
+            self.i18n.set_language("fr")
+            vod = VODGridView(db, stream_type="movie")
+            self.assertEqual(vod.category_title_label.text(), "TOUS LES FILMS")
+            self.assertIn("film", vod.items_count_label.text().lower())
+            self.assertIn("Trier", vod.sort_combo.itemText(0))
+
+            settings_view = SettingsView(db)
+            self.assertEqual(settings_view.auto_resume_cb.text().strip(), "Reprendre automatiquement la dernière chaîne au lancement")
+            self.assertEqual(settings_view.auto_reconnect_cb.text().strip(), "Reconnexion automatique en cas de coupure de flux")
+            self.assertEqual(settings_view.clear_cache_btn.text().strip(), "Vider le cache des logos de chaînes")
+            self.assertEqual(settings_view.btn_export_config.text().strip(), "Enregistrer la configuration sous...")
+            self.assertEqual(settings_view.btn_import_config.text().strip(), "Charger un fichier de configuration...")
+
+            # Basculement en anglais
+            self.i18n.set_language("en")
+            self.assertEqual(vod.category_title_label.text(), "ALL MOVIES")
+            self.assertIn("movie", vod.items_count_label.text().lower())
+            self.assertIn("Sort", vod.sort_combo.itemText(0))
+
+            self.assertEqual(settings_view.auto_resume_cb.text().strip(), "Automatically resume last channel on startup")
+            self.assertEqual(settings_view.auto_reconnect_cb.text().strip(), "Automatic reconnection if stream drops")
+            self.assertEqual(settings_view.clear_cache_btn.text().strip(), "Clear channel logo cache")
+            self.assertEqual(settings_view.btn_export_config.text().strip(), "Save configuration as...")
+            self.assertEqual(settings_view.btn_import_config.text().strip(), "Load configuration file...")
+
+        finally:
+            self.i18n.set_language("fr")
+            if os.path.exists(temp_db):
+                try:
+                    os.unlink(temp_db)
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":

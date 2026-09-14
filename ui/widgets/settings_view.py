@@ -38,6 +38,8 @@ class SettingsView(QWidget):
         self._init_ui()
         self._load_values()
 
+        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
+
     def _init_ui(self):
         root_layout = QHBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -276,6 +278,21 @@ class SettingsView(QWidget):
         layout.addStretch()
         return page
 
+    def _populate_deint_combo(self):
+        curr_data = self.deint_combo.currentData() if hasattr(self, "deint_combo") and self.deint_combo.count() > 0 else "auto"
+        self.deint_combo.blockSignals(True)
+        self.deint_combo.clear()
+        self.deint_combo.addItem(f"auto ({tr('Recommandé')})", "auto")
+        self.deint_combo.addItem(f"yes ({tr('Toujours activé')})", "yes")
+        self.deint_combo.addItem(f"no ({tr('Désactivé')})", "no")
+        idx = 0
+        for i in range(self.deint_combo.count()):
+            if self.deint_combo.itemData(i) == curr_data:
+                idx = i
+                break
+        self.deint_combo.setCurrentIndex(idx)
+        self.deint_combo.blockSignals(False)
+
     def _build_player_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -304,8 +321,8 @@ class SettingsView(QWidget):
         r2.addWidget(self.lbl_deint)
         r2.addStretch()
         self.deint_combo = QComboBox()
-        self.deint_combo.addItems(["auto (Recommandé)", "yes (Toujours activé)", "no (Désactivé)"])
         self.deint_combo.setFixedWidth(240)
+        self._populate_deint_combo()
         r2.addWidget(self.deint_combo)
         c_layout.addLayout(r2)
 
@@ -712,6 +729,13 @@ class SettingsView(QWidget):
                 break
         self.hwdec_combo.setCurrentIndex(idx)
 
+        # Désentrelacement
+        deint_val = "yes" if getattr(self.settings, "deinterlace", False) else "auto"
+        for i in range(self.deint_combo.count()):
+            if self.deint_combo.itemData(i) == deint_val:
+                self.deint_combo.setCurrentIndex(i)
+                break
+
         # Langue de l'application
         app_lang = getattr(self.settings, "app_language", "fr")
         for i in range(self.app_lang_combo.count()):
@@ -740,8 +764,8 @@ class SettingsView(QWidget):
         hw_txt = self.hwdec_combo.currentText().split()[0]
         self.settings.hwdec = hw_txt
 
-        deint_txt = "yes" in self.deint_combo.currentText().lower()
-        self.settings.deinterlace = deint_txt
+        deint_data = self.deint_combo.currentData() or "auto"
+        self.settings.deinterlace = (deint_data == "yes")
 
         self.db.save_settings(self.settings)
         self.save_status.setText("✓ " + tr("Paramètres enregistrés"))
@@ -755,12 +779,21 @@ class SettingsView(QWidget):
                 fp = os.path.join(cache_dir, f)
                 if os.path.isfile(fp):
                     os.unlink(fp)
-            QMessageBox.information(self, tr("Cache vidé"), tr("Le cache des logos a été nettoyé avec succès."))
+            QMessageBox.information(
+                self,
+                tr("Succès"),
+                tr("Le cache des logos a été vidé avec succès !")
+            )
         except Exception as e:
-            QMessageBox.warning(self, tr("Erreur"), tr("Impossible de vider le cache : {error}", error=str(e)))
+            QMessageBox.warning(
+                self,
+                tr("Erreur"),
+                tr("Impossible de vider le cache : {error}", error=str(e))
+            )
 
-    def retranslate_ui(self):
-        """Met à jour exhaustivement les textes des onglets, en-têtes et sous-pages de SettingsView."""
+    def retranslate_ui(self, *args):
+        """Met à jour dynamiquement tous les libellés de l'écran des paramètres."""
+        # Navigation latérale et en-tête
         if hasattr(self, "nav_title"):
             self.nav_title.setText(tr("Paramètres"))
         if hasattr(self, "close_btn"):
@@ -768,7 +801,6 @@ class SettingsView(QWidget):
         if hasattr(self, "save_btn"):
             self.save_btn.setText(" " + tr("Enregistrer les paramètres"))
 
-        # Boutons de navigation
         if hasattr(self, "btn_general"):
             self.btn_general.setText("  " + tr("Général & Interface"))
         if hasattr(self, "btn_player"):
@@ -784,13 +816,13 @@ class SettingsView(QWidget):
         if hasattr(self, "btn_about"):
             self.btn_about.setText("  " + tr("À propos"))
 
-        # Cartes intérieures
+        # Cartes enregistrées
         if hasattr(self, "_cards"):
             for t_lbl, d_lbl, title, desc in self._cards:
                 t_lbl.setText(tr(title))
                 d_lbl.setText(tr(desc))
 
-        # Page Générale
+        # Page Général
         if hasattr(self, "lbl_app_lang"):
             self.lbl_app_lang.setText(tr("Langue de l'application :"))
         if hasattr(self, "lbl_theme"):
@@ -816,6 +848,8 @@ class SettingsView(QWidget):
             self.lbl_hwdec.setText(tr("Décodage matériel (HW Accel) :"))
         if hasattr(self, "lbl_deint"):
             self.lbl_deint.setText(tr("Désentrelacement vidéo :"))
+        if hasattr(self, "deint_combo"):
+            self._populate_deint_combo()
         if hasattr(self, "lbl_buffer"):
             self.lbl_buffer.setText(tr("Taille du cache de préchargement :"))
         if hasattr(self, "buffer_spin"):
@@ -853,13 +887,21 @@ class SettingsView(QWidget):
         if hasattr(self, "exp_title"):
             self.exp_title.setText(tr("💾 Enregistrer la configuration (Sauvegarde)"))
         if hasattr(self, "exp_desc"):
-            self.exp_desc.setText(tr("Exporte vos listes de lecture, comptes/serveurs, favoris, historique de visionnage, chaînes masquées et reprises de lecture dans un fichier JSON compact (~150 Ko).<br><i>(Les chaînes brutes et affiches ne sont pas incluses pour garantir un fichier léger et rapide).</i>"))
+            self.exp_desc.setText(tr(
+                "Exporte vos listes de lecture, comptes/serveurs, favoris, historique de visionnage, "
+                "chaînes masquées et reprises de lecture dans un fichier JSON compact (~150 Ko).<br>"
+                "<i>(Les chaînes brutes et affiches ne sont pas incluses pour garantir un fichier léger et rapide).</i>"
+            ))
         if hasattr(self, "btn_export_config"):
             self.btn_export_config.setText("  " + tr("Enregistrer la configuration sous..."))
         if hasattr(self, "imp_title"):
             self.imp_title.setText(tr("📂 Charger une configuration (Restauration)"))
         if hasattr(self, "imp_desc"):
-            self.imp_desc.setText(tr("Charge un fichier de configuration précédemment sauvegardé. Le système fusionne intelligemment vos listes, cumule vos favoris et applique les reprises de lecture les plus récentes sans écraser vos données locales."))
+            self.imp_desc.setText(tr(
+                "Charge un fichier de configuration précédemment sauvegardé. "
+                "Le système fusionne intelligemment vos listes, cumule vos favoris et applique "
+                "les reprises de lecture les plus récentes sans écraser vos données locales."
+            ))
         if hasattr(self, "btn_import_config"):
             self.btn_import_config.setText("  " + tr("Charger un fichier de configuration..."))
 

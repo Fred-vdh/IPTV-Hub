@@ -2502,7 +2502,105 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "fr": "Épisode suivant",
         "en": "Next episode",
     },
+    # Tri dans les grilles Films & Séries
+    "Trier : Ordre du serveur (Original)": {
+        "fr": "Trier : Ordre du serveur (Original)",
+        "en": "Sort: Server order (Original)",
+    },
+    "Trier : Date d'ajout (plus récents...)": {
+        "fr": "Trier : Date d'ajout (plus récents...)",
+        "en": "Sort: Date added (Newest first)",
+    },
+    "Trier : Titre (A à Z)": {
+        "fr": "Trier : Titre (A à Z)",
+        "en": "Sort: Title (A to Z)",
+    },
+    "Trier : Titre (Z à A)": {
+        "fr": "Trier : Titre (Z à A)",
+        "en": "Sort: Title (Z to A)",
+    },
+    "Trier : Note (plus haute)": {
+        "fr": "Trier : Note (plus haute)",
+        "en": "Sort: Rating (Highest)",
+    },
+    "Trier : Année (plus récente)": {
+        "fr": "Trier : Année (plus récente)",
+        "en": "Sort: Year (Newest)",
+    },
+    "0 films": {
+        "fr": "0 films",
+        "en": "0 movies",
+    },
+    "0 séries": {
+        "fr": "0 séries",
+        "en": "0 series",
+    },
+    "40 premiers résultats sur {total}": {
+        "fr": "40 premiers résultats sur {total}",
+        "en": "First 40 results out of {total}",
+    },
+    # Paramètres : Désentrelacement
+    "auto (Recommandé)": {
+        "fr": "auto (Recommandé)",
+        "en": "auto (Recommended)",
+    },
+    "yes (Toujours activé)": {
+        "fr": "yes (Toujours activé)",
+        "en": "yes (Always enabled)",
+    },
+    "no (Désactivé)": {
+        "fr": "no (Désactivé)",
+        "en": "no (Disabled)",
+    },
+    "Recommandé": {
+        "fr": "Recommandé",
+        "en": "Recommended",
+    },
+    "Toujours activé": {
+        "fr": "Toujours activé",
+        "en": "Always enabled",
+    },
+    "Désactivé": {
+        "fr": "Désactivé",
+        "en": "Disabled",
+    },
+    # Clés sans espaces préfixes pour paramètres Général, Réseau, Stockage et Sauvegardes
+    "Reprendre automatiquement la dernière chaîne au lancement": {
+        "fr": "Reprendre automatiquement la dernière chaîne au lancement",
+        "en": "Automatically resume last channel on startup",
+    },
+    "Enchaîner automatiquement sur l'épisode suivant à la fin d'un épisode (Séries)": {
+        "fr": "Enchaîner automatiquement sur l'épisode suivant à la fin d'un épisode (Séries)",
+        "en": "Automatically play next episode when current episode finishes (Series)",
+    },
+    "Reconnexion automatique en cas de coupure de flux": {
+        "fr": "Reconnexion automatique en cas de coupure de flux",
+        "en": "Automatic reconnection if stream drops",
+    },
+    "Vider le cache des logos de chaînes": {
+        "fr": "Vider le cache des logos de chaînes",
+        "en": "Clear channel logo cache",
+    },
+    "Enregistrer la configuration sous...": {
+        "fr": "Enregistrer la configuration sous...",
+        "en": "Save configuration as...",
+    },
+    "Charger un fichier de configuration...": {
+        "fr": "Charger un fichier de configuration...",
+        "en": "Load configuration file...",
+    },
+    "Enregistrer la configuration (Sauvegarde)": {
+        "fr": "Enregistrer la configuration (Sauvegarde)",
+        "en": "Save Configuration (Backup)",
+    },
+    "Charger une configuration (Restauration)": {
+        "fr": "Charger une configuration (Restauration)",
+        "en": "Load Configuration (Restore)",
+    },
 }
+
+# Dictionnaire normalisé sans espaces aux extrémités pour recherche tolérante
+STRIPPED_TRANSLATIONS: Dict[str, Dict[str, str]] = {k.strip(): v for k, v in TRANSLATIONS.items()}
 
 
 class I18nManager(QObject):
@@ -2553,17 +2651,26 @@ class I18nManager(QObject):
         Si la chaîne n'a pas de traduction pour la langue courante,
         renvoie la traduction en français si existante, ou la clé source originale.
         Supporte les arguments dynamiques kwargs sous forme de {cle}.
+        Gère de manière tolérante les éventuels espaces préfixes ou suffixes.
         """
         if not text:
             return ""
 
+        # 1. Recherche directe exacte
         translations = TRANSLATIONS.get(text)
         if translations:
-            translated = translations.get(self._current_language)
-            if not translated:
-                translated = translations.get("fr", text)
+            translated = translations.get(self._current_language) or translations.get("fr", text)
         else:
-            translated = text
+            # 2. Recherche avec tolérance sur les espaces
+            stripped = text.strip()
+            translations = STRIPPED_TRANSLATIONS.get(stripped)
+            if translations:
+                raw_trans = translations.get(self._current_language) or translations.get("fr", stripped)
+                leading = len(text) - len(text.lstrip(" "))
+                trailing = len(text) - len(text.rstrip(" "))
+                translated = f"{' ' * leading}{raw_trans.strip()}{' ' * trailing}"
+            else:
+                translated = text
 
         if kwargs:
             try:

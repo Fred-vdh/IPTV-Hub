@@ -660,36 +660,6 @@ class MainWindow(QMainWindow):
 
         self.title_bar.playlist_combo.blockSignals(False)
 
-    def retranslate_ui(self):
-        """Met à jour dynamiquement tous les sous-composants lors d'un changement de langue."""
-        from core.i18n import tr
-        if hasattr(self, "title_bar") and hasattr(self.title_bar, "retranslate_ui"):
-            self.title_bar.retranslate_ui()
-        if hasattr(self, "sidebar") and hasattr(self.sidebar, "retranslate_ui"):
-            self.sidebar.retranslate_ui()
-        if hasattr(self, "dashboard_view") and hasattr(self.dashboard_view, "retranslate_ui"):
-            self.dashboard_view.retranslate_ui()
-        if hasattr(self, "favorites_view") and hasattr(self.favorites_view, "retranslate_ui"):
-            self.favorites_view.retranslate_ui()
-        if hasattr(self, "recently_added_view") and hasattr(self.recently_added_view, "retranslate_ui"):
-            self.recently_added_view.retranslate_ui()
-        if hasattr(self, "epg_grid_view") and hasattr(self.epg_grid_view, "retranslate_ui"):
-            self.epg_grid_view.retranslate_ui()
-        if hasattr(self, "history_view") and hasattr(self.history_view, "retranslate_ui"):
-            self.history_view.retranslate_ui()
-        if hasattr(self, "replay_view") and hasattr(self.replay_view, "retranslate_ui"):
-            self.replay_view.retranslate_ui()
-        if hasattr(self, "categories_panel") and hasattr(self.categories_panel, "retranslate_ui"):
-            self.categories_panel.retranslate_ui()
-        if hasattr(self, "player_controls") and hasattr(self.player_controls, "retranslate_ui"):
-            self.player_controls.retranslate_ui()
-        if hasattr(self, "movie_details_view") and hasattr(self.movie_details_view, "retranslate_ui"):
-            self.movie_details_view.retranslate_ui()
-        if hasattr(self, "series_details_view") and hasattr(self.series_details_view, "retranslate_ui"):
-            self.series_details_view.retranslate_ui()
-        self.refresh_playlists_combo()
-        self._update_search_placeholder(self.current_section)
-
     def get_selected_playlist_id(self) -> Optional[int]:
         return self.title_bar.playlist_combo.currentData()
 
@@ -3162,11 +3132,15 @@ class MainWindow(QMainWindow):
         if hasattr(self, "recently_added_view") and hasattr(self.recently_added_view, "retranslate_ui"):
             self.recently_added_view.retranslate_ui()
 
+        if hasattr(self, "player_controls") and hasattr(self.player_controls, "retranslate_ui"):
+            self.player_controls.retranslate_ui()
+
         if hasattr(self, "movie_details_view") and hasattr(self.movie_details_view, "retranslate_ui"):
             self.movie_details_view.retranslate_ui()
 
         if hasattr(self, "series_details_view") and hasattr(self.series_details_view, "retranslate_ui"):
             self.series_details_view.retranslate_ui()
 
+        self.refresh_playlists_combo()
         self._update_search_placeholder(self.current_section)
 

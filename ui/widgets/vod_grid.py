@@ -16,7 +16,7 @@ from core.database import Database
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from ui.widgets.poster_utils import draw_added_date_badge
-from core.i18n import tr
+from core.i18n import tr, I18nManager
 
 # ==============================================================================
 # FONCTIONNALITÉ EXPÉRIMENTALE : RECHERCHE PAR ACTEUR / RÉALISATEUR (OPTION 3)
@@ -409,6 +409,25 @@ class VODGridView(QWidget):
 
         self._init_ui()
 
+        from core.i18n import I18nManager
+        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
+
+    def _populate_sort_combo(self):
+        curr_idx = self.sort_combo.currentIndex() if self.sort_combo.count() > 0 else 0
+        self.sort_combo.blockSignals(True)
+        self.sort_combo.clear()
+        self.sort_combo.addItems([
+            tr("Trier : Ordre du serveur (Original)"),
+            tr("Trier : Date d'ajout (plus récents...)"),
+            tr("Trier : Titre (A à Z)"),
+            tr("Trier : Titre (Z à A)"),
+            tr("Trier : Note (plus haute)"),
+            tr("Trier : Année (plus récente)")
+        ])
+        if 0 <= curr_idx < self.sort_combo.count():
+            self.sort_combo.setCurrentIndex(curr_idx)
+        self.sort_combo.blockSignals(False)
+
     def _init_ui(self):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(16, 12, 16, 12)
@@ -426,11 +445,13 @@ class VODGridView(QWidget):
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
 
-        self.category_title_label = QLabel("TOUS LES FILMS")
+        default_cat_title = tr("TOUTES LES SÉRIES") if self.stream_type == "series" else tr("TOUS LES FILMS")
+        self.category_title_label = QLabel(default_cat_title)
         self.category_title_label.setStyleSheet("color: #ffffff; font-size: 17px; font-weight: 700;")
         title_box.addWidget(self.category_title_label)
 
-        self.items_count_label = QLabel("0 films")
+        default_count = "0 " + (tr("séries") if self.stream_type == "series" else tr("films"))
+        self.items_count_label = QLabel(default_count)
         self.items_count_label.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 500;")
         title_box.addWidget(self.items_count_label)
 
@@ -446,14 +467,6 @@ class VODGridView(QWidget):
         right_box.addWidget(sort_icon_lbl)
 
         self.sort_combo = QComboBox()
-        self.sort_combo.addItems([
-            "Trier : Ordre du serveur (Original)",
-            "Trier : Date d'ajout (plus récents...)",
-            "Trier : Titre (A à Z)",
-            "Trier : Titre (Z à A)",
-            "Trier : Note (plus haute)",
-            "Trier : Année (plus récente)"
-        ])
         self.sort_combo.setStyleSheet("""
             QComboBox {
                 background-color: #1e293b;
@@ -478,11 +491,12 @@ class VODGridView(QWidget):
                 padding: 4px;
             }
         """)
+        self._populate_sort_combo()
         self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         right_box.addWidget(self.sort_combo)
 
         # Bouton Refine / Filtre rapide
-        self.refine_btn = QPushButton(" Refine")
+        self.refine_btn = QPushButton(" " + tr("Refine"))
         self.refine_btn.setIcon(get_icon("filter_list", color="#e2e8f0"))
         self.refine_btn.setIconSize(QSize(14, 14))
         self.refine_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -506,11 +520,11 @@ class VODGridView(QWidget):
 
         # Bouton expérimental : Recherche par Artiste (Acteur / Réalisateur)
         if EXPERIMENTAL_ARTIST_SEARCH:
-            self.artist_btn = QPushButton(" Artiste")
+            self.artist_btn = QPushButton(" " + tr("Artiste"))
             self.artist_btn.setIcon(get_icon("person", color="#38bdf8"))
             self.artist_btn.setIconSize(QSize(14, 14))
             self.artist_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.artist_btn.setToolTip("Rechercher un acteur ou réalisateur (expérimental)")
+            self.artist_btn.setToolTip(tr("Rechercher un acteur ou réalisateur (expérimental)"))
             self.artist_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #1e293b;
@@ -740,8 +754,8 @@ class VODGridView(QWidget):
         self.progress_map = self.db.get_all_playback_progress_map()
 
         is_global_search = len(self.search_query) >= 3
-        item_singular = "série" if self.stream_type == "series" else "film"
-        item_plural = "séries" if self.stream_type == "series" else "films"
+        item_singular = tr("série") if self.stream_type == "series" else tr("film")
+        item_plural = tr("séries") if self.stream_type == "series" else tr("films")
 
         # Gestion du bandeau d'artiste contextuel (100% souris)
         if EXPERIMENTAL_ARTIST_SEARCH and hasattr(self, "artist_banner"):
@@ -754,7 +768,10 @@ class VODGridView(QWidget):
             else:
                 self.artist_banner.hide()
 
-        all_groups = ("Toutes les chaînes", "Tous les groupes", "Tous les films", "Toutes les séries", "Toutes les series")
+        all_groups = (
+            "Toutes les chaînes", "Tous les groupes", "Tous les films", "Toutes les séries", "Toutes les series",
+            "All channels", "All groups", "All movies", "All series"
+        )
         grp = None if is_global_search else (self.current_category if self.current_category not in all_groups else None)
         query_to_use = self.search_query if is_global_search else None
 
@@ -767,14 +784,14 @@ class VODGridView(QWidget):
                 stream_type=self.stream_type,
                 only_enabled=True
             )
-            self.category_title_label.setText(f'RECHERCHE : "{self.search_query.upper()}"')
+            self.category_title_label.setText(f'{tr("RECHERCHE :")} "{self.search_query.upper()}"')
             if self.total_items > 40:
-                self.items_count_label.setText(f"40 premiers résultats sur {self.total_items:,}".replace(",", " "))
+                tot_str = f"{self.total_items:,}".replace(",", " ")
+                self.items_count_label.setText(tr("40 premiers résultats sur {total}", total=tot_str))
             else:
                 self.items_count_label.setText(f"{self.total_items} {item_singular if self.total_items <= 1 else item_plural}")
         else:
             # Catégorie normale sélectionnée
-            all_groups = ("Toutes les chaînes", "Tous les groupes", "Tous les films", "Toutes les séries", "Toutes les series")
             grp = self.current_category if self.current_category not in all_groups else None
             self.total_items = self.db.get_channel_count(
                 playlist_id=self.current_playlist_id,
@@ -783,10 +800,15 @@ class VODGridView(QWidget):
                 stream_type=self.stream_type,
                 only_enabled=True
             )
-            cat_display = clean_category_display_name(self.current_category).upper() if self.current_category else item_plural.upper()
+            if not self.current_category or self.current_category in all_groups:
+                cat_display = tr("TOUTES LES SÉRIES") if self.stream_type == "series" else tr("TOUS LES FILMS")
+            else:
+                cat_display = clean_category_display_name(self.current_category).upper()
             self.category_title_label.setText(cat_display)
             formatted_total = f"{self.total_items:,}".replace(",", " ")
-            self.items_count_label.setText(f"{formatted_total} {item_plural}")
+            is_singular = (self.total_items <= 1) if I18nManager.instance().current_language == "fr" else (self.total_items == 1)
+            count_word = item_singular if is_singular else item_plural
+            self.items_count_label.setText(f"{formatted_total} {count_word}")
 
         # Nettoyage ultra-rapide de la grille sans saccade
         self.grid_container.setUpdatesEnabled(False)
@@ -1130,35 +1152,30 @@ class VODGridView(QWidget):
             finally:
                 self.grid_container.setUpdatesEnabled(True)
 
-    def retranslate_ui(self):
+    def retranslate_ui(self, *args):
         """Met à jour les libellés de la barre d'outils, du combo de tri et du bouton artiste."""
-        if self.stream_type == "series":
-            if not self.current_category or self.current_category in ("Toutes les séries", "All series"):
-                self.category_title_label.setText(tr("TOUTES LES SÉRIES"))
-            self.items_count_label.setText(f"{self.total_items} " + (tr("séries") if self.total_items > 1 else tr("série")))
-        else:
-            if not self.current_category or self.current_category in ("Tous les films", "All movies"):
-                self.category_title_label.setText(tr("TOUS LES FILMS"))
-            self.items_count_label.setText(f"{self.total_items} " + (tr("films") if self.total_items > 1 else tr("film")))
+        item_singular = tr("série") if self.stream_type == "series" else tr("film")
+        item_plural = tr("séries") if self.stream_type == "series" else tr("films")
 
-        curr_idx = self.sort_combo.currentIndex()
-        self.sort_combo.blockSignals(True)
-        self.sort_combo.clear()
-        self.sort_combo.addItems([
-            tr("Trier par :") + " " + tr("Par défaut (Serveur)"),
-            tr("Trier par :") + " " + tr("Plus récents d'abord"),
-            tr("Trier par :") + " " + tr("Nom (A-Z)"),
-            tr("Trier par :") + " " + tr("Nom (Z-A)"),
-            tr("Trier par :") + " " + tr("Mieux notés"),
-            tr("Trier par :") + " " + tr("Année (Plus récent)")
-        ])
-        if 0 <= curr_idx < self.sort_combo.count():
-            self.sort_combo.setCurrentIndex(curr_idx)
-        self.sort_combo.blockSignals(False)
+        all_groups = (
+            "Toutes les chaînes", "Tous les groupes", "Tous les films", "Toutes les séries", "Toutes les series",
+            "All channels", "All groups", "All movies", "All series"
+        )
+        if not self.current_category or self.current_category in all_groups:
+            self.category_title_label.setText(tr("TOUTES LES SÉRIES") if self.stream_type == "series" else tr("TOUS LES FILMS"))
+        else:
+            self.category_title_label.setText(clean_category_display_name(self.current_category).upper())
+
+        formatted_total = f"{self.total_items:,}".replace(",", " ")
+        is_singular = (self.total_items <= 1) if I18nManager.instance().current_language == "fr" else (self.total_items == 1)
+        count_word = item_singular if is_singular else item_plural
+        self.items_count_label.setText(f"{formatted_total} {count_word}")
+
+        self._populate_sort_combo()
 
         if hasattr(self, "refine_btn"):
-            self.refine_btn.setText(" " + tr("Affiner les résultats"))
+            self.refine_btn.setText(" " + tr("Refine"))
         if hasattr(self, "artist_btn"):
-            self.artist_btn.setText(" " + tr("Recherche par artiste"))
-            self.artist_btn.setToolTip(tr("Acteur ou Réalisateur..."))
+            self.artist_btn.setText(" " + tr("Artiste"))
+            self.artist_btn.setToolTip(tr("Rechercher un acteur ou réalisateur (expérimental)"))
 

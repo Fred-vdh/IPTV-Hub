@@ -24,17 +24,20 @@ def _format_exp_date(exp_str: Optional[str]) -> str:
     if not exp_str:
         return tr("Inconnue")
     try:
+        from core.i18n import I18nManager
         val = int(exp_str)
         dt = datetime.fromtimestamp(val)
         m_name = get_locale_month(dt.month, short=True)
+        lang = I18nManager.instance().current_language
+        date_str = f"{m_name} {dt.day}, {dt.year}" if lang == "en" else f"{dt.day} {m_name} {dt.year}"
         now = datetime.now()
         days_left = (dt - now).days
         if days_left > 0:
-            return f"{dt.day} {m_name} {dt.year} (" + tr("{days} j restants", days=days_left) + ")"
+            return f"{date_str} (" + tr("{days} j restants", days=days_left) + ")"
         elif days_left == 0:
             return tr("Aujourd'hui, {time}", time=dt.strftime('%H:%M'))
         else:
-            return tr("Expiré ({date})", date=f"{dt.day} {m_name} {dt.year}")
+            return tr("Expiré ({date})", date=date_str)
     except Exception:
         return str(exp_str)
 
