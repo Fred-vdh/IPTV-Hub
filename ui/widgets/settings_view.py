@@ -215,8 +215,8 @@ class SettingsView(QWidget):
         r_app_lang.addWidget(self.lbl_app_lang)
         r_app_lang.addStretch()
         self.app_lang_combo = QComboBox()
-        self.app_lang_combo.addItem("Français", "fr")
-        self.app_lang_combo.addItem("English", "en")
+        for code, label in I18nManager.SUPPORTED_LANGUAGES.items():
+            self.app_lang_combo.addItem(label, code)
         self.app_lang_combo.setFixedWidth(240)
         self.app_lang_combo.currentIndexChanged.connect(self._on_app_lang_changed)
         r_app_lang.addWidget(self.app_lang_combo)
