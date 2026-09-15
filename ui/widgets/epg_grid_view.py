@@ -986,6 +986,7 @@ class EPGGridView(QFrame):
         self.grid_scroll.verticalScrollBar().valueChanged.connect(
             self.channel_scroll.verticalScrollBar().setValue
         )
+        self._load_categories()
 
     def _build_date_buttons(self):
         for btn in self._date_buttons:

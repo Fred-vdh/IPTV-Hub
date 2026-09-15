@@ -144,6 +144,34 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "fr": "Toutes les catégories",
         "en": "All categories",
     },
+    "Toutes les chaînes": {
+        "fr": "Toutes les chaînes",
+        "en": "All channels",
+    },
+    "Rechercher dans cette catégorie...": {
+        "fr": "Rechercher dans cette catégorie...",
+        "en": "Search in this category...",
+    },
+    "Chercher dans cette catégorie": {
+        "fr": "Chercher dans cette catégorie",
+        "en": "Search in this category",
+    },
+    "Rechercher dans cette catégorie": {
+        "fr": "Rechercher dans cette catégorie",
+        "en": "Search in this category",
+    },
+    "Masquer / Afficher les catégories": {
+        "fr": "Masquer / Afficher les catégories",
+        "en": "Hide / Show categories",
+    },
+    "Afficher les catégories": {
+        "fr": "Afficher les catégories",
+        "en": "Show categories",
+    },
+    "Masquer les catégories": {
+        "fr": "Masquer les catégories",
+        "en": "Hide categories",
+    },
     "Toutes": {
         "fr": "Toutes",
         "en": "All",

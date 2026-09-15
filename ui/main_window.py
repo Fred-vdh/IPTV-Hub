@@ -3099,7 +3099,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "categories_panel") and hasattr(self.categories_panel, "retranslate_ui"):
             self.categories_panel.retranslate_ui()
 
-        if hasattr(self, "channel_list_panel") and hasattr(self.channel_list_panel, "retranslate_ui"):
+        if hasattr(self, "channel_panel") and hasattr(self.channel_panel, "retranslate_ui"):
+            self.channel_panel.retranslate_ui()
+        elif hasattr(self, "channel_list_panel") and hasattr(self.channel_list_panel, "retranslate_ui"):
             self.channel_list_panel.retranslate_ui()
 
         if hasattr(self, "settings_view") and hasattr(self.settings_view, "retranslate_ui"):

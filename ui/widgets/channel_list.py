@@ -18,7 +18,7 @@ from core.image_loader import ImageLoader
 from ui.widgets.channel_model import ChannelListModel
 from ui.widgets.channel_delegate import ChannelItemDelegate
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
-from core.i18n import tr
+from core.i18n import tr, I18nManager
 
 
 class ChannelListPanel(QFrame):
@@ -56,19 +56,19 @@ class ChannelListPanel(QFrame):
         self.search_timer.timeout.connect(self._perform_search)
 
         self._init_ui()
+        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
 
     def _init_ui(self):
         channels_layout = QVBoxLayout(self)
-        channels_layout.setContentsMargins(10, 12, 10, 10)
+        channels_layout.setContentsMargins(10, 10, 10, 10)
         channels_layout.setSpacing(8)
 
-        # 1. En-tête de catégorie active (style IPTVnator)
+        # 1. En-tête : Titre de la catégorie courante & Contrôles
         cat_header_row = QHBoxLayout()
-        cat_header_row.setContentsMargins(4, 0, 4, 0)
-        cat_header_row.setSpacing(8)
+        cat_header_row.setSpacing(6)
 
-        self.cat_title_label = QLabel("Toutes les chaînes")
-        self.cat_title_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #ffffff;")
+        self.cat_title_label = QLabel(tr("Toutes les catégories"))
+        self.cat_title_label.setStyleSheet("font-size: 13px; font-weight: 700; color: #ffffff;")
         cat_header_row.addWidget(self.cat_title_label, stretch=1)
 
         self.cat_count_badge = QLabel("0")
@@ -83,24 +83,24 @@ class ChannelListPanel(QFrame):
         """)
         cat_header_row.addWidget(self.cat_count_badge)
 
-        # Bouton Tri (Serveur / A-Z / Z-A)
+        # Bouton Tri A-Z
         self.sort_az_btn = QPushButton()
         self.sort_az_btn.setIcon(get_icon("sort_by_alpha", color=DEFAULT_ICON_COLOR))
-        self.sort_az_btn.setIconSize(QSize(18, 18))
+        self.sort_az_btn.setIconSize(QSize(16, 16))
         self.sort_az_btn.setFixedSize(28, 28)
         self.sort_az_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sort_az_btn.setToolTip("Trier les chaînes (Serveur / A-Z / Z-A)")
+        self.sort_az_btn.setToolTip(tr("Trier par :"))
         self.sort_az_btn.setStyleSheet("background: transparent; border: none; border-radius: 4px;")
         self.sort_az_btn.clicked.connect(self._show_sort_menu)
         cat_header_row.addWidget(self.sort_az_btn)
 
-        # Bouton Replier / Déplier catégories
+        # Chevron pour replier/afficher le panneau des catégories
         self.toggle_cat_btn = QPushButton()
         self.toggle_cat_btn.setIcon(get_icon("chevron_left", color=DEFAULT_ICON_COLOR))
         self.toggle_cat_btn.setIconSize(QSize(20, 20))
         self.toggle_cat_btn.setFixedSize(28, 28)
         self.toggle_cat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.toggle_cat_btn.setToolTip("Masquer / Afficher les catégories")
+        self.toggle_cat_btn.setToolTip(tr("Masquer / Afficher les catégories"))
         self.toggle_cat_btn.setStyleSheet("background: transparent; border: none; border-radius: 4px;")
         self.toggle_cat_btn.clicked.connect(self.toggle_categories_requested.emit)
         cat_header_row.addWidget(self.toggle_cat_btn)
@@ -110,7 +110,7 @@ class ChannelListPanel(QFrame):
         # 2. Barre de recherche interne
         self.search_input = QLineEdit()
         self.search_input.setObjectName("searchBox")
-        self.search_input.setPlaceholderText("Rechercher dans cette catégorie...")
+        self.search_input.setPlaceholderText(tr("Rechercher dans cette catégorie..."))
         self.search_input.setClearButtonEnabled(True)
         search_icon = get_icon("search", color="#94a3b8")
         self.search_input.addAction(search_icon, QLineEdit.ActionPosition.LeadingPosition)
@@ -131,7 +131,7 @@ class ChannelListPanel(QFrame):
 
     def set_categories_collapsed(self, collapsed: bool):
         self.toggle_cat_btn.setIcon(get_icon("chevron_right" if collapsed else "chevron_left", color=DEFAULT_ICON_COLOR))
-        self.toggle_cat_btn.setToolTip("Afficher les catégories" if collapsed else "Masquer les catégories")
+        self.toggle_cat_btn.setToolTip(tr("Afficher les catégories") if collapsed else tr("Masquer les catégories"))
 
     # ------------------ GESTION DES CHAÎNES & FILTRES ------------------
 
@@ -301,10 +301,13 @@ class ChannelListPanel(QFrame):
 
         menu.exec(QCursor.pos())
 
-    def retranslate_ui(self):
+    def retranslate_ui(self, *args):
         """Met à jour les infobulles, placeholders et titres de ChannelListPanel."""
-        self.sort_az_btn.setToolTip(tr("Trier par :"))
-        self.search_input.setPlaceholderText(tr("Filtrer les chaînes..."))
-        if self.current_selected_category in ("Toutes les chaînes", "All channels", ""):
-            self.cat_title_label.setText(tr("Toutes les catégories"))
+        if hasattr(self, "sort_az_btn"):
+            self.sort_az_btn.setToolTip(tr("Trier par :"))
+        if hasattr(self, "search_input"):
+            self.search_input.setPlaceholderText(tr("Rechercher dans cette catégorie..."))
+        if hasattr(self, "cat_title_label"):
+            if self.current_selected_category in ("Toutes les chaînes", "All channels", ""):
+                self.cat_title_label.setText(tr("Toutes les chaînes"))
 

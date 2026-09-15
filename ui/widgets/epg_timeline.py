@@ -19,7 +19,7 @@ from PyQt6.QtGui import (
 from core.models import Channel, EPGProgram
 from core.database import Database
 from ui.icons import get_icon
-from core.i18n import tr
+from core.i18n import tr, I18nManager
 
 
 def normalize_to_naive_dt(dt_or_str) -> Optional[datetime]:
@@ -340,6 +340,7 @@ class EPGTimelinePanel(QWidget):
         self.live_timer.start()
 
         self._init_ui()
+        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
 
     def _init_ui(self):
         root_layout = QVBoxLayout(self)
@@ -650,8 +651,11 @@ class EPGTimelinePanel(QWidget):
 
     def retranslate_ui(self):
         """Met à jour les textes traduits de la frise chronologique."""
-        if hasattr(self, "channel_title_label") and not self.channel:
-            self.channel_title_label.setText(tr("Guide des programmes"))
+        if hasattr(self, "channel_title_label"):
+            if not getattr(self, "current_channel", None):
+                self.channel_title_label.setText(tr("Guide des programmes"))
+            else:
+                self.channel_title_label.setText(self.current_channel.name)
         if hasattr(self, "info_note_label"):
             self.info_note_label.setText(tr("ℹ Programme uniquement. Ce fournisseur expose l'historique mais pas le catch-up."))
         if hasattr(self, "now_btn"):

@@ -345,7 +345,58 @@ class TestI18n(unittest.TestCase):
                 except Exception:
                     pass
 
+    def test_epg_combo_channel_search_and_settings_switch_to_fr(self):
+        """Vérifie la traduction de 'Toutes les chaînes', 'Rechercher dans cette catégorie...' et le retour sans crash à FR."""
+        from ui.widgets.epg_grid_view import EPGGridView
+        from ui.widgets.channel_list import ChannelListPanel
+        from ui.widgets.epg_timeline import EPGTimelinePanel
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            temp_db = f.name
+        try:
+            db = Database(temp_db)
+
+            # Clés pures
+            self.i18n.set_language("fr")
+            self.assertEqual(tr("Toutes les chaînes"), "Toutes les chaînes")
+            self.assertEqual(tr("Rechercher dans cette catégorie..."), "Rechercher dans cette catégorie...")
+
+            self.i18n.set_language("en")
+            self.assertEqual(tr("Toutes les chaînes"), "All channels")
+            self.assertEqual(tr("Rechercher dans cette catégorie..."), "Search in this category...")
+
+            # Widgets
+            self.i18n.set_language("fr")
+            epg_grid = EPGGridView(db)
+            ch_list = ChannelListPanel(db)
+            timeline = EPGTimelinePanel(db)
+
+            self.assertEqual(epg_grid.cat_combo.itemText(0), "Toutes les chaînes")
+            self.assertEqual(ch_list.search_input.placeholderText(), "Rechercher dans cette catégorie...")
+            self.assertEqual(timeline.channel_title_label.text(), "Guide des programmes")
+
+            # Basculement vers EN
+            self.i18n.set_language("en")
+            self.assertEqual(epg_grid.cat_combo.itemText(0), "All channels")
+            self.assertEqual(ch_list.search_input.placeholderText(), "Search in this category...")
+            self.assertEqual(timeline.channel_title_label.text(), "TV Guide")
+
+            # Retour vers FR (test du correctif de non-crash dans EPGTimelinePanel)
+            self.i18n.set_language("fr")
+            self.assertEqual(epg_grid.cat_combo.itemText(0), "Toutes les chaînes")
+            self.assertEqual(ch_list.search_input.placeholderText(), "Rechercher dans cette catégorie...")
+            self.assertEqual(timeline.channel_title_label.text(), "Guide des programmes")
+
+        finally:
+            self.i18n.set_language("fr")
+            if os.path.exists(temp_db):
+                try:
+                    os.unlink(temp_db)
+                except Exception:
+                    pass
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

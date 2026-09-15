@@ -825,6 +825,14 @@ class SettingsView(QWidget):
         # Page Général
         if hasattr(self, "lbl_app_lang"):
             self.lbl_app_lang.setText(tr("Langue de l'application :"))
+        if hasattr(self, "app_lang_combo"):
+            curr_lang = I18nManager.instance().current_language
+            for i in range(self.app_lang_combo.count()):
+                if self.app_lang_combo.itemData(i) == curr_lang:
+                    self.app_lang_combo.blockSignals(True)
+                    self.app_lang_combo.setCurrentIndex(i)
+                    self.app_lang_combo.blockSignals(False)
+                    break
         if hasattr(self, "lbl_theme"):
             self.lbl_theme.setText(tr("Thème de l'interface :"))
         if hasattr(self, "theme_combo"):
