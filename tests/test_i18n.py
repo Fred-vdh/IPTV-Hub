@@ -23,17 +23,26 @@ class TestI18n(unittest.TestCase):
     def tearDown(self):
         self.i18n.set_language("fr")
 
+    def test_supported_languages(self):
+        """Vérifie que SUPPORTED_LANGUAGES contient exactement les 4 langues supportées."""
+        expected = {
+            "fr": "Français",
+            "en": "English",
+            "es": "Español",
+            "de": "Deutsch",
+        }
+        self.assertEqual(I18nManager.SUPPORTED_LANGUAGES, expected)
+
     def test_translations_dict_structure(self):
-        """Vérifie que chaque entrée de TRANSLATIONS possède une traduction 'fr' et 'en' valide."""
+        """Vérifie que chaque entrée de TRANSLATIONS possède une traduction 'fr', 'en', 'es', 'de' valide."""
         for key, val in TRANSLATIONS.items():
             self.assertIsInstance(val, dict, f"La valeur pour '{key}' doit être un dictionnaire.")
-            self.assertIn("fr", val, f"La clé '{key}' n'a pas de traduction en français.")
-            self.assertIn("en", val, f"La clé '{key}' n'a pas de traduction en anglais.")
-            self.assertTrue(bool(val["fr"].strip()), f"Traduction 'fr' vide pour '{key}'")
-            self.assertTrue(bool(val["en"].strip()), f"Traduction 'en' vide pour '{key}'")
+            for lang in ["fr", "en", "es", "de"]:
+                self.assertIn(lang, val, f"La clé '{key}' n'a pas de traduction en '{lang}'.")
+                self.assertTrue(bool(val[lang].strip()), f"Traduction '{lang}' vide pour '{key}'")
 
-    def test_tr_function_french_and_english(self):
-        """Vérifie la fonction tr() en français et en anglais."""
+    def test_tr_function_all_languages(self):
+        """Vérifie la fonction tr() dans les 4 langues (fr, en, es, de)."""
         self.i18n.set_language("fr")
         self.assertEqual(tr("Tableau de bord"), "Tableau de bord")
         self.assertEqual(tr("Paramètres"), "Paramètres")
@@ -43,6 +52,16 @@ class TestI18n(unittest.TestCase):
         self.assertEqual(tr("Tableau de bord"), "Dashboard")
         self.assertEqual(tr("Paramètres"), "Settings")
         self.assertEqual(tr("TV en direct"), "Live TV")
+
+        self.i18n.set_language("es")
+        self.assertEqual(tr("Tableau de bord"), "Panel de control")
+        self.assertEqual(tr("Paramètres"), "Configuración")
+        self.assertEqual(tr("TV en direct"), "TV en vivo")
+
+        self.i18n.set_language("de")
+        self.assertEqual(tr("Tableau de bord"), "Dashboard")
+        self.assertEqual(tr("Paramètres"), "Einstellungen")
+        self.assertEqual(tr("TV en direct"), "Live-TV")
 
     def test_tr_fallback_for_unknown_key(self):
         """Vérifie que tr() retourne la clé d'origine sans planter pour un texte inconnu."""
@@ -135,7 +154,7 @@ class TestI18n(unittest.TestCase):
         self.assertEqual(tr("Films & Séries favoris"), "Favorite movies & series")
 
     def test_format_locale_date(self):
-        """Vérifie le formatage localisé des dates (FR / EN)."""
+        """Vérifie le formatage localisé des dates (FR / EN / ES / DE)."""
         from datetime import datetime
         from core.i18n import format_locale_date
         test_dt = datetime(2026, 9, 14, 22, 30)
@@ -147,6 +166,46 @@ class TestI18n(unittest.TestCase):
         self.i18n.set_language("en")
         self.assertEqual(format_locale_date(test_dt, "short"), "09/14/2026")
         self.assertEqual(format_locale_date(test_dt, "friendly"), "Sep 14, 22:30")
+
+        self.i18n.set_language("es")
+        self.assertEqual(format_locale_date(test_dt, "short"), "14/09/2026")
+        self.assertEqual(format_locale_date(test_dt, "friendly"), "14 sept., 22:30")
+
+        self.i18n.set_language("de")
+        self.assertEqual(format_locale_date(test_dt, "short"), "14.09.2026")
+        self.assertEqual(format_locale_date(test_dt, "friendly"), "14. Sept., 22:30")
+
+    def test_locale_weekdays_and_months(self):
+        """Vérifie get_locale_weekday et get_locale_month pour toutes les langues."""
+        from core.i18n import get_locale_weekday, get_locale_month
+
+        # FR
+        self.i18n.set_language("fr")
+        self.assertEqual(get_locale_weekday(0), "Lundi")
+        self.assertEqual(get_locale_weekday(0, short=True), "Lun.")
+        self.assertEqual(get_locale_month(1, short=False), "janvier")
+        self.assertEqual(get_locale_month(1, short=True), "janv.")
+
+        # EN
+        self.i18n.set_language("en")
+        self.assertEqual(get_locale_weekday(0), "Monday")
+        self.assertEqual(get_locale_weekday(0, short=True), "Mon")
+        self.assertEqual(get_locale_month(1, short=False), "January")
+        self.assertEqual(get_locale_month(1, short=True), "Jan")
+
+        # ES
+        self.i18n.set_language("es")
+        self.assertEqual(get_locale_weekday(0), "Lunes")
+        self.assertEqual(get_locale_weekday(0, short=True), "Lun.")
+        self.assertEqual(get_locale_month(1, short=False), "enero")
+        self.assertEqual(get_locale_month(1, short=True), "ene.")
+
+        # DE
+        self.i18n.set_language("de")
+        self.assertEqual(get_locale_weekday(0), "Montag")
+        self.assertEqual(get_locale_weekday(0, short=True), "Mo.")
+        self.assertEqual(get_locale_month(1, short=False), "Januar")
+        self.assertEqual(get_locale_month(1, short=True), "Jan.")
 
     def test_widgets_hot_retranslation(self):
         """Vérifie que les composants graphiques se mettent à jour automatiquement lors d'un changement de langue."""
@@ -219,6 +278,39 @@ class TestI18n(unittest.TestCase):
             self.assertEqual(dash.sec_recent_live.title_label.text(), "Recently watched live TV")
             self.assertEqual(dash.sec_favs.title_label.text(), "Favorite movies & series")
             self.assertEqual(dash.sec_recents.title_label.text(), "Recently added on the playlist")
+
+            # Basculement en espagnol (ES)
+            self.i18n.set_language("es")
+            self.assertEqual(tb.pl_label.text(), "Lista:")
+            self.assertEqual(fav.title_label.text(), "Favoritos")
+            self.assertEqual(fav.btn_movies.text(), "Películas")
+            self.assertEqual(fav.btn_series.text(), "Series")
+            self.assertEqual(fav.btn_live.text(), "TV en vivo")
+            self.assertIn("Esta lista de reproducción", fav.btn_this_playlist.text())
+            self.assertIn("Todas las listas de reproducción", fav.btn_all_playlists.text())
+            self.assertEqual(dash.sec_continue.title_label.text(), "Continuar viendo")
+            self.assertEqual(dash.sec_recent_live.title_label.text(), "TV en vivo vista recientemente")
+            self.assertEqual(dash.sec_favs.title_label.text(), "Películas y series favoritas")
+            self.assertEqual(dash.sec_recents.title_label.text(), "Añadidos recientemente en la lista")
+
+            # Basculement en allemand (DE)
+            self.i18n.set_language("de")
+            self.assertEqual(tb.pl_label.text(), "Wiedergabeliste:")
+            self.assertEqual(fav.title_label.text(), "Favoriten")
+            self.assertEqual(fav.btn_movies.text(), "Filme")
+            self.assertEqual(fav.btn_series.text(), "Serien")
+            self.assertEqual(fav.btn_live.text(), "Live-TV")
+            self.assertIn("Diese Wiedergabeliste", fav.btn_this_playlist.text())
+            self.assertIn("Alle Wiedergabelisten", fav.btn_all_playlists.text())
+            self.assertEqual(dash.sec_continue.title_label.text(), "Wiedergabe fortsetzen")
+            self.assertEqual(dash.sec_recent_live.title_label.text(), "Kürzlich gesehene Live-Sender")
+            self.assertEqual(dash.sec_favs.title_label.text(), "Lieblingsfilme & -serien")
+            self.assertEqual(dash.sec_recents.title_label.text(), "Kürzlich hinzugefügt auf die Liste")
+
+            # Retour en français (FR)
+            self.i18n.set_language("fr")
+            self.assertEqual(tb.pl_label.text(), "Liste :")
+            self.assertEqual(fav.title_label.text(), "Favoris")
         finally:
             self.i18n.set_language("fr")
             if os.path.exists(temp_db):
