@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRect
 from PyQt6.QtGui import (
     QPixmap, QPainter, QColor, QFont, QMouseEvent,
-    QPen, QPainterPath
+    QPen, QPainterPath, QLinearGradient
 )
 
 from core.models import Channel, parse_movie_metadata
@@ -45,9 +45,10 @@ class FavoritePosterWidget(QWidget):
     """Widget d'affiche avec badge qualité, bouton de suppression × et effet hover."""
     remove_clicked = pyqtSignal(Channel)
 
-    def __init__(self, channel: Channel, parent: Optional[QWidget] = None):
+    def __init__(self, channel: Channel, parent: Optional[QWidget] = None, has_new_episodes: bool = False):
         super().__init__(parent)
         self.channel = channel
+        self.has_new_episodes = has_new_episodes
         self.meta = parse_movie_metadata(channel.name, channel.rating, channel.year)
         self.pixmap: Optional[QPixmap] = None
         self.is_hovered = False
@@ -168,6 +169,27 @@ class FavoritePosterWidget(QWidget):
         # 5. Bouton croix × de suppression rapide en haut à gauche
         self._draw_cross_button(painter)
 
+        # 5.bis Badge NOUVEAU pour les séries favorites avec nouveaux épisodes
+        if getattr(self, "has_new_episodes", False):
+            painter.save()
+            new_text = tr("✨ NOUVEAU")
+            font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+            painter.setFont(font)
+            metrics = painter.fontMetrics()
+            bw = metrics.horizontalAdvance(new_text) + 10
+            bh = 17
+            bx = 32
+            by = 6
+            bg_brush = QLinearGradient(bx, by, bx + bw, by + bh)
+            bg_brush.setColorAt(0.0, QColor("#059669"))
+            bg_brush.setColorAt(1.0, QColor("#10b981"))
+            painter.setBrush(bg_brush)
+            painter.setPen(QPen(QColor("#34d399"), 1))
+            painter.drawRoundedRect(QRect(bx, by, bw, bh), 4, 4)
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(QRect(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, new_text)
+            painter.restore()
+
         # 6. Badge date d'ajout (Films et Séries)
         if self.channel and self.channel.stream_type in ("movie", "series"):
             draw_added_date_badge(painter, self.channel.added_at, rect.width(), rect.height(), bottom_offset=6)
@@ -262,9 +284,10 @@ class FavoriteCardWidget(QWidget):
     CARD_WIDTH = 160
     TOTAL_HEIGHT = 300
 
-    def __init__(self, channel: Channel, parent: Optional[QWidget] = None):
+    def __init__(self, channel: Channel, parent: Optional[QWidget] = None, has_new_episodes: bool = False):
         super().__init__(parent)
         self.channel = channel
+        self.has_new_episodes = has_new_episodes
         self.setFixedSize(self.CARD_WIDTH, self.TOTAL_HEIGHT)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -273,7 +296,7 @@ class FavoriteCardWidget(QWidget):
         layout.setSpacing(5)
 
         # 1. Poster avec badge et bouton croix
-        self.poster_widget = FavoritePosterWidget(channel, parent=self)
+        self.poster_widget = FavoritePosterWidget(channel, parent=self, has_new_episodes=has_new_episodes)
         self.poster_widget.remove_clicked.connect(self.remove_requested.emit)
         layout.addWidget(self.poster_widget)
 
@@ -581,9 +604,13 @@ class FavoritesView(QWidget):
         card_w = FavoriteCardWidget.CARD_WIDTH + 18
         cols = max(2, available_w // card_w)
 
+        # Ensemble des séries favorites actives avec de nouveaux épisodes
+        active_new_ep_ids = self.db.get_active_new_episodes_series_ids(playlist_id=target_pl_id)
+
         # 4. Peupler la grille
         for i, ch in enumerate(channels):
-            card = FavoriteCardWidget(ch, parent=self.container_widget)
+            is_new = bool(ch.stream_type == "series" and (ch.playlist_id, str(ch.stream_id)) in active_new_ep_ids)
+            card = FavoriteCardWidget(ch, parent=self.container_widget, has_new_episodes=is_new)
             card.clicked.connect(self._on_card_clicked)
             card.remove_requested.connect(self._on_remove_requested)
             row = i // cols

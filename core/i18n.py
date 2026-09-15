@@ -13,6 +13,30 @@ from PyQt6.QtCore import QObject, pyqtSignal
 # Valeur : dictionnaire des traductions {"fr": "...", "en": "...", "es": "...", "de": "..."}
 
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
+    "Nouveaux épisodes de vos séries favorites": {
+        "fr": "Nouveaux épisodes de vos séries favorites",
+        "en": "New episodes of favorite series",
+        "es": "Nuevos episodios de series favoritas",
+        "de": "Neue Folgen Ihrer Lieblingsserien",
+    },
+    "✨ NOUVEAU": {
+        "fr": "✨ NOUVEAU",
+        "en": "✨ NEW",
+        "es": "✨ NUEVO",
+        "de": "✨ NEU",
+    },
+    "NOUVEAU": {
+        "fr": "NOUVEAU",
+        "en": "NEW",
+        "es": "NUEVO",
+        "de": "NEU",
+    },
+    "Nouvel épisode": {
+        "fr": "Nouvel épisode",
+        "en": "New episode",
+        "es": "Nuevo episodio",
+        "de": "Neue Folge",
+    },
     "IPTV Hub": {
         "fr": "IPTV Hub",
         "en": "IPTV Hub",
@@ -3426,6 +3450,16 @@ class I18nManager(QObject):
 def tr(text: str, **kwargs: Any) -> str:
     """Raccourci global de traduction."""
     return I18nManager.instance().translate(text, **kwargs)
+
+
+def set_language(lang_code: str):
+    """Définit la langue globale active."""
+    I18nManager.instance().set_language(lang_code)
+
+
+def get_language() -> str:
+    """Retourne le code de la langue active."""
+    return I18nManager.instance().current_language
 
 
 # -----------------------------------------------------------------------------

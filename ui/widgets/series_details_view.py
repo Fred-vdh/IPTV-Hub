@@ -138,7 +138,8 @@ class EpisodeCardWidget(QWidget):
         progress_ratio: float = 0.0,
         is_current_playing: bool = False,
         fallback_urls: Optional[List[str]] = None,
-        parent: Optional[QWidget] = None
+        parent: Optional[QWidget] = None,
+        is_new: bool = False
     ):
         super().__init__(parent)
         self.episode = episode
@@ -146,6 +147,7 @@ class EpisodeCardWidget(QWidget):
         self.is_watched = is_watched
         self.progress_ratio = progress_ratio
         self.is_current_playing = is_current_playing
+        self.is_new = is_new
         self.fallback_urls = [u for u in (fallback_urls or []) if u]
         self._current_fallback_idx = 0
         self._active_loading_url = ""
@@ -309,6 +311,11 @@ class EpisodeCardWidget(QWidget):
         self.is_watched = is_watched
         self.progress_bar.set_progress(ratio, is_watched)
         if was_completed != now_completed:
+            self.thumb_container.update()
+
+    def set_is_new(self, is_new: bool):
+        if self.is_new != is_new:
+            self.is_new = is_new
             self.thumb_container.update()
 
     def _get_check_rect(self) -> QRect:
@@ -478,6 +485,27 @@ class EpisodeCardWidget(QWidget):
         painter.setPen(QColor("#ffffff"))
         painter.drawText(bx, by, badge_w, badge_h, Qt.AlignmentFlag.AlignCenter, ep_num_str)
         painter.restore()
+
+        # 6. Pastille NOUVEAU pour les épisodes non vus considérés comme nouveaux
+        if getattr(self, "is_new", False) and not is_completed:
+            painter.save()
+            new_text = tr("NOUVEAU")
+            font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+            painter.setFont(font)
+            metrics = painter.fontMetrics()
+            bw = metrics.horizontalAdvance(new_text) + 10
+            bh = 17
+            bx = rect.width() - bw - 6
+            by = 6
+            bg_brush = QLinearGradient(bx, by, bx + bw, by + bh)
+            bg_brush.setColorAt(0.0, QColor("#059669"))
+            bg_brush.setColorAt(1.0, QColor("#10b981"))
+            painter.setBrush(bg_brush)
+            painter.setPen(QPen(QColor("#34d399"), 1))
+            painter.drawRoundedRect(QRect(bx, by, bw, bh), 4, 4)
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(QRect(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, new_text)
+            painter.restore()
 
 
 class SeriesDetailsView(QWidget):
@@ -1731,6 +1759,12 @@ class SeriesDetailsView(QWidget):
         self._current_col_count = col_count
 
         progress_map = self.db.get_all_playback_progress_map()
+        new_ep_ids = set()
+        if self.db and self.channel:
+            new_ep_ids = set(self.db.get_new_episode_ids_for_series(
+                self.channel.playlist_id,
+                str(self.channel.stream_id)
+            ))
 
         # Fallbacks ordonnés pour les vignettes :
         # 1. Backdrop 16:9 paysage de la série (même ratio panoramique 16:9 que les cartes d'épisodes)
@@ -1766,7 +1800,8 @@ class SeriesDetailsView(QWidget):
                 progress_ratio=prog_ratio,
                 is_current_playing=is_cur_playing,
                 fallback_urls=fallback_urls,
-                parent=self.seasons_container
+                parent=self.seasons_container,
+                is_new=bool(ep_id in new_ep_ids)
             )
             card.clicked.connect(self._on_episode_card_clicked)
             card.toggle_watched_clicked.connect(self._on_episode_toggle_watched)
@@ -1812,6 +1847,14 @@ class SeriesDetailsView(QWidget):
                 duration=dur
             )
             self._marked_watched_episodes.add(str(ep_id))
+            # Acquitter le statut nouveau pour cet épisode
+            if self.db and self.channel and ep_id:
+                self.db.dismiss_new_episode(
+                    playlist_id=self.channel.playlist_id,
+                    series_id=str(self.channel.stream_id),
+                    episode_id=ep_id,
+                    stream_url=stream_url
+                )
 
         # Mettre à jour l'interface instantanément (vignettes, coche sur l'onglet saison, bouton reprendre)
         self.refresh_progress()
@@ -1866,6 +1909,12 @@ class SeriesDetailsView(QWidget):
     def refresh_progress(self):
         """Met à jour l'état de visionnage des onglets de saisons, des épisodes et du bouton Reprendre."""
         progress_map = self.db.get_all_playback_progress_map()
+        new_ep_ids = set()
+        if self.db and self.channel:
+            new_ep_ids = set(self.db.get_new_episode_ids_for_series(
+                self.channel.playlist_id,
+                str(self.channel.stream_id)
+            ))
         if hasattr(self, "episodes_grid"):
             for i in range(self.episodes_grid.count()):
                 item = self.episodes_grid.itemAt(i)
@@ -1873,6 +1922,8 @@ class SeriesDetailsView(QWidget):
                 if isinstance(w, EpisodeCardWidget):
                     prog_ratio, is_w = self._get_episode_progress(w.episode, progress_map)
                     w.set_progress_ratio(prog_ratio, is_w)
+                    ep_id = str(w.episode.get("id", ""))
+                    w.set_is_new(bool(ep_id in new_ep_ids))
         self._update_season_tab_buttons()
         self._update_resume_button_text()
 
@@ -2074,6 +2125,22 @@ class SeriesDetailsView(QWidget):
 
         if all_series_episodes:
             selected_ep = all_series_episodes[current_ep_idx]
+            # Acquitter le statut nouveau pour cet épisode dès le lancement de la lecture
+            curr_ep_id = str(ep_dict.get("id", ""))
+            if self.db and self.channel and curr_ep_id:
+                self.db.dismiss_new_episode(
+                    playlist_id=self.channel.playlist_id,
+                    series_id=str(self.channel.stream_id),
+                    episode_id=curr_ep_id,
+                    stream_url=selected_ep.stream_url
+                )
+                if hasattr(self, "episodes_grid"):
+                    for i in range(self.episodes_grid.count()):
+                        item = self.episodes_grid.itemAt(i)
+                        w = item.widget() if item else None
+                        if isinstance(w, EpisodeCardWidget) and str(w.episode.get("id", "")) == curr_ep_id:
+                            w.set_is_new(False)
+
             prog = self.db.get_playback_progress(stream_url=selected_ep.stream_url)
             start_pos = prog[0] if prog else 0.0
             self.play_episode_requested.emit(selected_ep, all_series_episodes, current_ep_idx, start_pos)

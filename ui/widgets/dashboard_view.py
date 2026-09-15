@@ -634,10 +634,11 @@ class DashboardPosterCard(QWidget):
     POSTER_HEIGHT = 210
     TOTAL_HEIGHT = 258
 
-    def __init__(self, channel: Channel, progress_info: Optional[Dict[str, Any]] = None, parent: Optional[QWidget] = None):
+    def __init__(self, channel: Channel, progress_info: Optional[Dict[str, Any]] = None, parent: Optional[QWidget] = None, has_new_episodes: bool = False):
         super().__init__(parent)
         self.channel = channel
         self.progress_info = progress_info
+        self.has_new_episodes = has_new_episodes
         self.meta = parse_movie_metadata(channel.name, channel.rating, channel.year)
         self.pixmap: Optional[QPixmap] = None
         self.is_hovered = False
@@ -775,11 +776,26 @@ class DashboardPosterCard(QWidget):
             painter.drawText(QRect(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, q_tag)
             painter.restore()
 
-        # 4.bis Badge date d'ajout (Films et Séries)
-        if self.channel and self.channel.stream_type in ("movie", "series"):
-            has_prog = bool(self.progress_info and self.progress_info.get("percentage", 0) > 0 and not self.progress_info.get("is_completed", False))
-            bottom_off = 10 if has_prog else 6
-            draw_added_date_badge(painter, self.channel.added_at, self.CARD_WIDTH, self.POSTER_HEIGHT, bottom_offset=bottom_off)
+        # 4.ter Badge NOUVEAU pour les séries avec nouveaux épisodes
+        if getattr(self, "has_new_episodes", False):
+            painter.save()
+            new_text = tr("✨ NOUVEAU")
+            font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+            painter.setFont(font)
+            metrics = painter.fontMetrics()
+            bw = metrics.horizontalAdvance(new_text) + 12
+            bh = 17
+            bx = 6
+            by = 6
+            bg_brush = QLinearGradient(bx, by, bx + bw, by + bh)
+            bg_brush.setColorAt(0.0, QColor("#059669"))
+            bg_brush.setColorAt(1.0, QColor("#10b981"))
+            painter.setBrush(bg_brush)
+            painter.setPen(QPen(QColor("#34d399"), 1))
+            painter.drawRoundedRect(QRect(bx, by, bw, bh), 4, 4)
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(QRect(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, new_text)
+            painter.restore()
 
         # 5. Titre du film / série / replay sous l'affiche
         painter.save()
@@ -1212,6 +1228,18 @@ class DashboardView(QWidget):
         self.sec_recent_live.see_all_clicked.connect(self.navigate_section_requested.emit)
         self.container_layout.addWidget(self.sec_recent_live)
 
+        # 3.bis Section "Nouveaux épisodes de vos séries favorites"
+        self.sec_new_episodes = DashboardSection(
+            tr("Nouveaux épisodes de vos séries favorites"),
+            "series",
+            see_all_str,
+            content_height=262,
+            parent=self.container_widget
+        )
+        self.sec_new_episodes.see_all_clicked.connect(lambda: self.navigate_section_requested.emit("series"))
+        self.sec_new_episodes.setVisible(False)
+        self.container_layout.addWidget(self.sec_new_episodes)
+
         # 4. Section "Films & Séries favoris"
         self.sec_favs = DashboardSection(tr("Films & Séries favoris"), "favorites", see_all_str, content_height=262, parent=self.container_widget)
         self.sec_favs.see_all_clicked.connect(self.navigate_section_requested.emit)
@@ -1267,6 +1295,23 @@ class DashboardView(QWidget):
         else:
             self.sec_recent_live.setVisible(False)
 
+        # Ensemble des séries favorites ayant de nouveaux épisodes
+        active_new_ep_ids = self.db.get_active_new_episodes_series_ids(playlist_id=pl_id)
+
+        # 2.bis Nouveaux épisodes de vos séries favorites
+        new_ep_series = self.db.get_active_new_episodes_series(playlist_id=pl_id)
+        self.sec_new_episodes.clear_items()
+        self.sec_new_episodes.set_badge_count(len(new_ep_series))
+        self.sec_new_episodes.set_see_all_text(tr("Voir les {count} >", count=len(new_ep_series)) if new_ep_series else (tr("Voir tout") + " >"))
+        if new_ep_series:
+            self.sec_new_episodes.setVisible(True)
+            for ch in new_ep_series:
+                card = DashboardPosterCard(ch, parent=self.sec_new_episodes.items_container, has_new_episodes=True)
+                card.clicked.connect(self._on_channel_clicked)
+                self.sec_new_episodes.add_item(card)
+        else:
+            self.sec_new_episodes.setVisible(False)
+
         # 3. Favorite movies & series
         fav_channels = self.db.get_channels(
             playlist_id=pl_id,
@@ -1281,7 +1326,8 @@ class DashboardView(QWidget):
         if fav_vod_series:
             self.sec_favs.setVisible(True)
             for ch in fav_vod_series:
-                card = DashboardPosterCard(ch, parent=self.sec_favs.items_container)
+                is_new = bool(ch.stream_type == "series" and (ch.playlist_id, str(ch.stream_id)) in active_new_ep_ids)
+                card = DashboardPosterCard(ch, parent=self.sec_favs.items_container, has_new_episodes=is_new)
                 card.clicked.connect(self._on_channel_clicked)
                 self.sec_favs.add_item(card)
         else:
@@ -1304,7 +1350,8 @@ class DashboardView(QWidget):
         if recent_vod:
             self.sec_recents.setVisible(True)
             for ch in recent_vod:
-                card = DashboardPosterCard(ch, parent=self.sec_recents.items_container)
+                is_new = bool(ch.stream_type == "series" and (ch.playlist_id, str(ch.stream_id)) in active_new_ep_ids)
+                card = DashboardPosterCard(ch, parent=self.sec_recents.items_container, has_new_episodes=is_new)
                 card.clicked.connect(self._on_channel_clicked)
                 self.sec_recents.add_item(card)
         else:
@@ -1325,6 +1372,8 @@ class DashboardView(QWidget):
         q = query.lower().strip()
         self.sec_continue.filter_items(q)
         self.sec_recent_live.filter_items(q)
+        if hasattr(self, "sec_new_episodes"):
+            self.sec_new_episodes.filter_items(q)
         self.sec_favs.filter_items(q)
         self.sec_recents.filter_items(q)
 
@@ -1349,6 +1398,10 @@ class DashboardView(QWidget):
         if hasattr(self, "sec_recent_live"):
             self.sec_recent_live.title_label.setText(tr("TV en direct récemment regardée"))
             self.sec_recent_live.set_see_all_text(see_all_str)
+
+        if hasattr(self, "sec_new_episodes"):
+            self.sec_new_episodes.title_label.setText(tr("Nouveaux épisodes de vos séries favorites"))
+            self.sec_new_episodes.set_see_all_text(see_all_str)
 
         if hasattr(self, "sec_favs"):
             self.sec_favs.title_label.setText(tr("Films & Séries favoris"))

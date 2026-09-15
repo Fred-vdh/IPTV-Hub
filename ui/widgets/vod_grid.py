@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QScrollArea, QGridLayout, QMenu, QFrame, QDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRect, QTimer, QThread, QObject
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QCursor, QMouseEvent, QPen, QPainterPath
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QCursor, QMouseEvent, QPen, QPainterPath, QLinearGradient
 
 from core.models import Channel, parse_movie_metadata, clean_category_display_name
 from core.database import Database
@@ -78,11 +78,12 @@ class VODQueryWorker(QThread):
 
 class PosterWidget(QWidget):
     """Widget dédié à l'affiche du film avec coins arrondis, badges et barre de progression."""
-    def __init__(self, channel: Channel, is_watched: bool = False, progress_ratio: float = 0.0, parent: Optional[QWidget] = None):
+    def __init__(self, channel: Channel, is_watched: bool = False, progress_ratio: float = 0.0, parent: Optional[QWidget] = None, has_new_episodes: bool = False):
         super().__init__(parent)
         self.channel = channel
         self.is_watched = is_watched
         self.progress_ratio = progress_ratio
+        self.has_new_episodes = has_new_episodes
         self.meta = parse_movie_metadata(channel.name, channel.rating, channel.year)
         self.pixmap: Optional[QPixmap] = None
         self.is_hovered = False
@@ -190,6 +191,27 @@ class PosterWidget(QWidget):
         if rating_str:
             self._draw_rating_badge(painter, rating_str)
 
+        # 4.bis Badge NOUVEAU pour les séries
+        if getattr(self, "has_new_episodes", False):
+            painter.save()
+            new_text = tr("✨ NOUVEAU")
+            font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+            painter.setFont(font)
+            metrics = painter.fontMetrics()
+            bw = metrics.horizontalAdvance(new_text) + 10
+            bh = 17
+            bx = 6
+            by = 6
+            bg_brush = QLinearGradient(bx, by, bx + bw, by + bh)
+            bg_brush.setColorAt(0.0, QColor("#059669"))
+            bg_brush.setColorAt(1.0, QColor("#10b981"))
+            painter.setBrush(bg_brush)
+            painter.setPen(QPen(QColor("#34d399"), 1))
+            painter.drawRoundedRect(QRect(bx, by, bw, bh), 4, 4)
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(QRect(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, new_text)
+            painter.restore()
+
         # 5. Pastille verte de visionnage
         if self.is_watched:
             self._draw_watched_badge(painter)
@@ -269,11 +291,12 @@ class MovieCardWidget(QWidget):
     CARD_WIDTH = 160
     TOTAL_HEIGHT = 285
 
-    def __init__(self, channel: Channel, is_watched: bool = False, progress_ratio: float = 0.0, parent: Optional[QWidget] = None):
+    def __init__(self, channel: Channel, is_watched: bool = False, progress_ratio: float = 0.0, parent: Optional[QWidget] = None, has_new_episodes: bool = False):
         super().__init__(parent)
         self.channel = channel
         self.is_watched = is_watched
         self.progress_ratio = progress_ratio
+        self.has_new_episodes = has_new_episodes
 
         self.setFixedSize(self.CARD_WIDTH, self.TOTAL_HEIGHT)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -283,7 +306,7 @@ class MovieCardWidget(QWidget):
         layout.setSpacing(6)
 
         # 1. Affiche
-        self.poster_widget = PosterWidget(channel, is_watched=is_watched, progress_ratio=progress_ratio, parent=self)
+        self.poster_widget = PosterWidget(channel, is_watched=is_watched, progress_ratio=progress_ratio, parent=self, has_new_episodes=has_new_episodes)
         layout.addWidget(self.poster_widget)
 
         # 2. Titre du film
@@ -732,7 +755,8 @@ class VODGridView(QWidget):
             prog_ratio = (pos / dur) if dur > 0 else 0.0
 
         prog_ratio = min(0.95, max(0.0, prog_ratio))
-        card = MovieCardWidget(movie, is_watched=is_w, progress_ratio=prog_ratio, parent=self.grid_container)
+        is_new = bool(self.stream_type == "series" and (movie.playlist_id, str(movie.stream_id)) in getattr(self, "active_new_ep_ids", set()))
+        card = MovieCardWidget(movie, is_watched=is_w, progress_ratio=prog_ratio, parent=self.grid_container, has_new_episodes=is_new)
         card.clicked.connect(self.movie_selected.emit)
         card.details_requested.connect(self.movie_details_requested.emit)
         card.favorite_toggled.connect(self._on_favorite_toggled)
@@ -741,6 +765,8 @@ class VODGridView(QWidget):
     def refresh(self):
         """Réinitialise la galerie et charge les films ou séries de manière asynchrone et fluide."""
         self._is_stopped = False
+        pl_id = getattr(self, "current_playlist_id", None)
+        self.active_new_ep_ids = self.db.get_active_new_episodes_series_ids(pl_id) if self.stream_type == "series" else set()
         # 1. Annulation de toute requête en cours et invalidation des lots précédents
         self._current_batch_id += 1
         self._pending_cards_queue.clear()

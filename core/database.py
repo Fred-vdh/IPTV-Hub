@@ -347,6 +347,42 @@ class Database:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_series_cache_lookup ON series_cache(playlist_id, series_id);")
+
+            # Table des alertes de nouveaux épisodes pour les séries favorites
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS favorite_series_updates (
+                    playlist_id INTEGER NOT NULL,
+                    series_id TEXT NOT NULL,
+                    series_name TEXT NOT NULL,
+                    last_modified TEXT,
+                    previous_modified TEXT,
+                    detected_at TEXT NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    PRIMARY KEY (playlist_id, series_id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_fav_series_updates_active ON favorite_series_updates(playlist_id, is_active);")
+            try:
+                cursor.execute("ALTER TABLE favorite_series_updates ADD COLUMN previous_modified TEXT;")
+            except Exception:
+                pass
+
+            # Table des épisodes précis considérés comme nouveaux
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS series_new_episode_flags (
+                    playlist_id INTEGER NOT NULL,
+                    series_id TEXT NOT NULL,
+                    episode_id TEXT NOT NULL,
+                    season_num INTEGER DEFAULT 1,
+                    episode_num INTEGER DEFAULT 1,
+                    stream_url TEXT,
+                    detected_at TEXT NOT NULL,
+                    is_dismissed INTEGER DEFAULT 0,
+                    PRIMARY KEY (playlist_id, series_id, episode_id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_series_new_ep_active ON series_new_episode_flags(playlist_id, series_id, is_dismissed);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_series_new_ep_url ON series_new_episode_flags(stream_url);")
             conn.commit()
 
     # ------------------ PLAYLISTS ------------------
@@ -492,10 +528,11 @@ class Database:
 
                 # 1.ter Charger les dates d'ajout existantes pour ne pas les perdre si non fournies
                 cursor.execute(
-                    "SELECT stream_url, stream_id, stream_type, name, added_at FROM channels WHERE playlist_id=? AND added_at IS NOT NULL AND added_at != ''",
+                    "SELECT stream_url, stream_id, stream_type, name, added_at, is_favorite FROM channels WHERE playlist_id=? AND added_at IS NOT NULL AND added_at != ''",
                     (playlist_id,)
                 )
                 existing_added = {}
+                existing_series = {}
                 for r in cursor.fetchall():
                     if r["stream_id"]:
                         existing_added[(str(r["stream_id"]), r["stream_type"])] = r["added_at"]
@@ -503,10 +540,13 @@ class Database:
                         existing_added[r["stream_url"]] = r["added_at"]
                     if r["name"]:
                         existing_added[(r["name"], r["stream_type"])] = r["added_at"]
+                    if r["stream_type"] == "series" and r["stream_id"]:
+                        existing_series[str(r["stream_id"])] = (r["added_at"] or "", bool(r["is_favorite"]))
 
                 cursor.execute("DELETE FROM channels WHERE playlist_id=?", (playlist_id,))
             else:
                 existing_added = {}
+                existing_series = {}
 
             # 2. Charger l'index des favoris persistants pour réconciliation automatique
             cursor.execute("SELECT name, stream_url, stream_id, stream_type, favorite_added_at FROM persistent_favorites")
@@ -587,6 +627,25 @@ class Database:
                         item_added_at = existing_added[(c.name, c.stream_type)]
                     else:
                         item_added_at = datetime.now().isoformat()
+
+                # Détection de nouveaux épisodes pour les séries favorites
+                if (c.stream_type or "live") == "series" and is_fav and c.stream_id:
+                    s_id_str = str(c.stream_id)
+                    if s_id_str in existing_series:
+                        old_added, was_fav = existing_series[s_id_str]
+                        # Si la série était déjà en base (ou favorite) et que son horodatage est plus récent
+                        if item_added_at and old_added and str(item_added_at) > str(old_added):
+                            cursor.execute("""
+                                INSERT INTO favorite_series_updates (playlist_id, series_id, series_name, last_modified, previous_modified, detected_at, is_active)
+                                VALUES (?, ?, ?, ?, ?, ?, 1)
+                                ON CONFLICT(playlist_id, series_id) DO UPDATE SET
+                                    series_name=excluded.series_name,
+                                    last_modified=excluded.last_modified,
+                                    previous_modified=excluded.previous_modified,
+                                    detected_at=excluded.detected_at,
+                                    is_active=1
+                            """, (playlist_id, s_id_str, c.name, str(item_added_at), str(old_added), datetime.now().isoformat()))
+                            cursor.execute("DELETE FROM series_cache WHERE playlist_id=? AND series_id=?", (playlist_id, s_id_str))
 
                 params.append((
                     playlist_id,
@@ -1079,7 +1138,7 @@ class Database:
                 (1 if is_favorite else 0, fav_date, channel_id)
             )
             # Synchronisation de la table persistante
-            cursor.execute("SELECT name, stream_url, stream_id, stream_type, logo_url, group_title FROM channels WHERE id = ?", (channel_id,))
+            cursor.execute("SELECT name, stream_url, stream_id, stream_type, logo_url, group_title, playlist_id FROM channels WHERE id = ?", (channel_id,))
             ch_row = cursor.fetchone()
             if ch_row:
                 if is_favorite:
@@ -1097,6 +1156,10 @@ class Database:
                         "DELETE FROM persistent_favorites WHERE (name = ? AND stream_type = ?) OR (stream_url IS NOT NULL AND stream_url = ?)",
                         (ch_row["name"], ch_row["stream_type"], ch_row["stream_url"])
                     )
+                    cursor.execute("""
+                        UPDATE favorite_series_updates SET is_active = 0
+                        WHERE (series_id = ? AND series_id != '' AND playlist_id = ?) OR series_name = ?
+                    """, (ch_row["stream_id"], ch_row["playlist_id"], ch_row["name"]))
             conn.commit()
 
     def toggle_favorite(self, channel_id: int, is_favorite: Optional[bool] = None) -> bool:
@@ -1117,7 +1180,7 @@ class Database:
                 (1 if new_val else 0, fav_date, channel_id)
             )
             # Synchronisation de la table persistante
-            cursor.execute("SELECT name, stream_url, stream_id, stream_type, logo_url, group_title FROM channels WHERE id = ?", (channel_id,))
+            cursor.execute("SELECT name, stream_url, stream_id, stream_type, logo_url, group_title, playlist_id FROM channels WHERE id = ?", (channel_id,))
             ch_row = cursor.fetchone()
             if ch_row:
                 if new_val:
@@ -1135,6 +1198,10 @@ class Database:
                         "DELETE FROM persistent_favorites WHERE (name = ? AND stream_type = ?) OR (stream_url IS NOT NULL AND stream_url = ?)",
                         (ch_row["name"], ch_row["stream_type"], ch_row["stream_url"])
                     )
+                    cursor.execute("""
+                        UPDATE favorite_series_updates SET is_active = 0
+                        WHERE (series_id = ? AND series_id != '' AND playlist_id = ?) OR series_name = ?
+                    """, (ch_row["stream_id"], ch_row["playlist_id"], ch_row["name"]))
             conn.commit()
             return new_val
 
@@ -1809,6 +1876,12 @@ class Database:
                 """, (channel_id, stream_url, channel_name, saved_pos, effective_dur, now_iso))
             conn.commit()
 
+        # Dès le début du visionnage ou le marquage comme vu, acquitter le statut "nouveau" de cet épisode
+        try:
+            self.dismiss_new_episode(stream_url=stream_url)
+        except Exception:
+            pass
+
     def get_playback_progress(self, channel_id: Optional[int] = None, stream_url: Optional[str] = None) -> Optional[Tuple[float, float]]:
         """Retourne (position, duration) si une reprise valide existe (< 95% et > 10s), sinon None."""
         with self.get_connection() as conn:
@@ -2422,4 +2495,209 @@ class Database:
                 VALUES (?, ?, ?, CURRENT_TIMESTAMP)
             """, (int(playlist_id), str(series_id), data_json))
             conn.commit()
+
+        # Si cette série est une favorite avec une alerte de nouveaux épisodes, flagger les épisodes
+        self.flag_new_episodes_for_series(playlist_id, series_id, data)
+
+    # ------------------ NOUVEAUX ÉPISODES DES SÉRIES FAVORITES ------------------
+
+    def get_active_new_episodes_series(self, playlist_id: Optional[int] = None) -> List[Channel]:
+        """Retourne la liste des séries favorites ayant des nouveaux épisodes non vus."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT DISTINCT c.* FROM channels c
+                JOIN favorite_series_updates u
+                  ON c.playlist_id = u.playlist_id AND c.stream_id = u.series_id
+                WHERE c.stream_type = 'series'
+                  AND c.is_favorite = 1
+                  AND c.is_enabled = 1
+                  AND u.is_active = 1
+            """
+            params: List[Any] = []
+            if playlist_id is not None:
+                query += " AND c.playlist_id = ?"
+                params.append(playlist_id)
+            query += " ORDER BY u.detected_at DESC, c.name ASC"
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            channels = []
+            for r in rows:
+                d = dict(r)
+                d["is_favorite"] = bool(d.get("is_favorite", 0))
+                d["is_enabled"] = bool(d.get("is_enabled", 1))
+                extra = d.get("extra_headers")
+                d["extra_headers"] = json.loads(extra) if extra else {}
+                channels.append(_instantiate_dataclass(Channel, d))
+            return channels
+
+    def get_active_new_episodes_series_ids(self, playlist_id: Optional[int] = None) -> Set[Any]:
+        """Retourne un ensemble contenant à la fois (playlist_id, series_id) et series_id pour toutes les séries favorites avec nouveaux épisodes."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            query = "SELECT playlist_id, series_id FROM favorite_series_updates WHERE is_active = 1"
+            params: List[Any] = []
+            if playlist_id is not None:
+                query += " AND playlist_id = ?"
+                params.append(playlist_id)
+            cursor.execute(query, params)
+            res: Set[Any] = set()
+            for r in cursor.fetchall():
+                pid = int(r["playlist_id"])
+                sid = str(r["series_id"])
+                res.add((pid, sid))
+                res.add(sid)
+            return res
+
+    def flag_new_episodes_for_series(self, playlist_id: int, series_id: str, episodes_data: Dict[str, Any], series_name: str = ""):
+        """
+        Enregistre les épisodes individuels non vus d'une série favorite ayant reçu une mise à jour.
+        """
+        if not playlist_id or not series_id or not isinstance(episodes_data, dict):
+            return
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT is_active, previous_modified FROM favorite_series_updates WHERE playlist_id = ? AND series_id = ?",
+                (playlist_id, str(series_id))
+            )
+            row = cursor.fetchone()
+            if not row or not row["is_active"]:
+                return
+
+            prev_modified = str(row["previous_modified"] or "").strip()
+
+            # Récupérer les flux déjà vus
+            cursor.execute("SELECT stream_url, playback_position, duration FROM playback_progress")
+            watched_urls = set()
+            for pr in cursor.fetchall():
+                pos = float(pr["playback_position"] or 0)
+                dur = float(pr["duration"] or 0)
+                if dur > 0 and (pos / dur >= 0.90 or (dur - pos) <= 60):
+                    if pr["stream_url"]:
+                        watched_urls.add(pr["stream_url"])
+
+            now_str = datetime.now().isoformat()
+            episodes_dict = episodes_data.get("episodes", {})
+            if not isinstance(episodes_dict, dict):
+                return
+
+            for s_key, ep_list in episodes_dict.items():
+                if not isinstance(ep_list, list):
+                    continue
+                try:
+                    s_num = int(s_key)
+                except Exception:
+                    s_num = 1
+                for ep in ep_list:
+                    if not isinstance(ep, dict):
+                        continue
+                    ep_id = str(ep.get("id", ""))
+                    if not ep_id:
+                        continue
+                    ep_num = int(ep.get("episode_num", 1))
+                    ep_url = str(ep.get("url", ""))
+
+                    # Si l'ancienne date de modification est connue, filtrer les épisodes déjà présents
+                    ep_added = str(ep.get("added") or ep.get("release_date") or "").strip()
+                    if prev_modified and ep_added:
+                        try:
+                            if ep_added.isdigit() and prev_modified.isdigit():
+                                if int(ep_added) <= int(prev_modified):
+                                    continue
+                            elif ep_added <= prev_modified:
+                                continue
+                        except Exception:
+                            pass
+
+                    # Vérifier si déjà vu
+                    is_w = any((ep_url and ep_url in watched_urls) or (f"/{ep_id}." in w) for w in watched_urls)
+                    if is_w:
+                        continue
+
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO series_new_episode_flags
+                        (playlist_id, series_id, episode_id, season_num, episode_num, stream_url, detected_at, is_dismissed)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                    """, (playlist_id, str(series_id), ep_id, s_num, ep_num, ep_url, now_str))
+
+            conn.commit()
+
+    def get_new_episode_ids_for_series(self, playlist_id: int, series_id: str) -> Set[str]:
+        """Retourne l'ensemble des IDs d'épisodes nouveaux non acquittés pour cette série."""
+        if not playlist_id or not series_id:
+            return set()
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT episode_id FROM series_new_episode_flags
+                WHERE playlist_id = ? AND series_id = ? AND is_dismissed = 0
+            """, (int(playlist_id), str(series_id)))
+            return {str(r["episode_id"]) for r in cursor.fetchall()}
+
+    def dismiss_new_episode(
+        self,
+        stream_url: Optional[str] = None,
+        playlist_id: Optional[int] = None,
+        series_id: Optional[str] = None,
+        episode_id: Optional[str] = None
+    ) -> bool:
+        """
+        Acquitte un épisode nouveau (dès le début de la lecture ou lors du marquage comme vu).
+        Si plus aucun épisode nouveau non acquitté ne reste pour cette série, l'alerte sur la série est désactivée.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            affected_series = []
+
+            if episode_id and playlist_id and series_id:
+                cursor.execute("""
+                    UPDATE series_new_episode_flags
+                    SET is_dismissed = 1
+                    WHERE playlist_id = ? AND series_id = ? AND episode_id = ?
+                """, (int(playlist_id), str(series_id), str(episode_id)))
+                affected_series.append((int(playlist_id), str(series_id)))
+            elif episode_id:
+                cursor.execute("SELECT playlist_id, series_id FROM series_new_episode_flags WHERE episode_id = ?", (str(episode_id),))
+                for r in cursor.fetchall():
+                    affected_series.append((int(r["playlist_id"]), str(r["series_id"])))
+                cursor.execute("UPDATE series_new_episode_flags SET is_dismissed = 1 WHERE episode_id = ?", (str(episode_id),))
+            elif stream_url:
+                cursor.execute("""
+                    SELECT playlist_id, series_id FROM series_new_episode_flags
+                    WHERE stream_url = ? OR ? LIKE '%' || episode_id || '.%'
+                """, (stream_url, stream_url))
+                for r in cursor.fetchall():
+                    affected_series.append((int(r["playlist_id"]), str(r["series_id"])))
+                cursor.execute("""
+                    UPDATE series_new_episode_flags SET is_dismissed = 1
+                    WHERE stream_url = ? OR ? LIKE '%' || episode_id || '.%'
+                """, (stream_url, stream_url))
+            elif playlist_id and series_id:
+                cursor.execute("""
+                    UPDATE series_new_episode_flags SET is_dismissed = 1
+                    WHERE playlist_id = ? AND series_id = ?
+                """, (int(playlist_id), str(series_id)))
+                affected_series.append((int(playlist_id), str(series_id)))
+
+            # Vérifier pour chaque série affectée s'il reste des épisodes non acquittés
+            for pl_id, s_id in set(affected_series):
+                cursor.execute("""
+                    SELECT COUNT(*) AS remaining FROM series_new_episode_flags
+                    WHERE playlist_id = ? AND series_id = ? AND is_dismissed = 0
+                """, (pl_id, s_id))
+                rem = cursor.fetchone()["remaining"]
+                if rem == 0:
+                    cursor.execute("""
+                        UPDATE favorite_series_updates
+                        SET is_active = 0
+                        WHERE playlist_id = ? AND series_id = ?
+                    """, (pl_id, s_id))
+
+            conn.commit()
+            return True
+
+    def dismiss_all_new_episodes_for_series(self, playlist_id: int, series_id: str) -> bool:
+        """Acquitte tous les nouveaux épisodes pour une série."""
+        return self.dismiss_new_episode(playlist_id=playlist_id, series_id=series_id)
 
