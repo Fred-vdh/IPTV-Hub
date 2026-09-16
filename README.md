@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.1.5-blue.svg?style=flat-square" alt="Version 2.1.5">
+  <img src="https://img.shields.io/badge/version-2.1.6-blue.svg?style=flat-square" alt="Version 2.1.6">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-brightgreen.svg?style=flat-square" alt="Plateformes">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-square" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/GUI-PyQt6-green.svg?style=flat-square" alt="PyQt6">
@@ -80,15 +80,15 @@
 
 ---
 
-## 📦 Téléchargements (Releases v2.1.5)
+## 📦 Téléchargements (Releases v2.1.6)
 
 Vous pouvez télécharger la version adaptée à votre système directement depuis la section **[Releases](https://github.com/Fred-vdh/IPTV-Hub/releases/latest)** :
 
 | Système | Format | Description | Lien |
 | :--- | :--- | :--- | :--- |
-| **Windows 10 / 11** | **Installateur (`.exe`)** | Assistant d'installation complet (raccourcis bureau, menu Démarrer, DLLs incluses) | 📥 [**Télécharger l'installateur Windows**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.5/IPTV_Hub_Setup.exe) |
-| **Windows 10 / 11** | **Version Portable (`.zip`)** | Prêt à l'emploi sans installation (décompressez et lancez `IPTV_Hub.exe`) | 📥 [**Télécharger la version Portable**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.5/IPTV_Hub_Portable_Win64.zip) |
-| **Linux** (Toutes distributions) | **Paquet d'installation (`.tar.gz`)** | Installation automatique avec intégration bureau XDG et raccourci dans vos applications | 📥 [**Télécharger le paquet Linux**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.5/IPTV_Hub_Linux.tar.gz) |
+| **Windows 10 / 11** | **Installateur (`.exe`)** | Assistant d'installation complet (raccourcis bureau, menu Démarrer, DLLs incluses) | 📥 [**Télécharger l'installateur Windows**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.6/IPTV_Hub_Setup.exe) |
+| **Windows 10 / 11** | **Version Portable (`.zip`)** | Prêt à l'emploi sans installation (décompressez et lancez `IPTV_Hub.exe`) | 📥 [**Télécharger la version Portable**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.6/IPTV_Hub_Portable_Win64.zip) |
+| **Linux** (Toutes distributions) | **Paquet d'installation (`.tar.gz`)** | Installation automatique avec intégration bureau XDG et raccourci dans vos applications | 📥 [**Télécharger le paquet Linux**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.6/IPTV_Hub_Linux.tar.gz) |
 
 ---
 
@@ -128,12 +128,12 @@ Vous pouvez télécharger la version adaptée à votre système directement depu
 ### 🪟 Sous Windows
 
 #### Méthode 1 : Installateur classique
-1. Téléchargez [`IPTV_Hub_Setup.exe`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.5/IPTV_Hub_Setup.exe).
+1. Téléchargez [`IPTV_Hub_Setup.exe`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.6/IPTV_Hub_Setup.exe).
 2. Lancez l'exécutable et suivez l'assistant d'installation (disponible en français et en anglais).
 3. L'application est installée et accessible depuis votre Bureau et votre menu Démarrer.
 
 #### Méthode 2 : Version Portable
-1. Téléchargez [`IPTV_Hub_Portable_Win64.zip`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.5/IPTV_Hub_Portable_Win64.zip).
+1. Téléchargez [`IPTV_Hub_Portable_Win64.zip`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.6/IPTV_Hub_Portable_Win64.zip).
 2. Décompressez l'archive où vous le souhaitez (disque dur, clé USB).
 3. Double-cliquez sur `IPTV_Hub.exe` pour démarrer directement !
 
@@ -141,7 +141,7 @@ Vous pouvez télécharger la version adaptée à votre système directement depu
 
 ### 🐧 Sous Linux (Ubuntu, Debian, Linux Mint, Zorin OS, Fedora, Arch...)
 
-1. Téléchargez [`IPTV_Hub_Linux.tar.gz`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.5/IPTV_Hub_Linux.tar.gz).
+1. Téléchargez [`IPTV_Hub_Linux.tar.gz`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.1.6/IPTV_Hub_Linux.tar.gz).
 2. Ouvrez un terminal dans le dossier et lancez :
    ```bash
    tar -xzf IPTV_Hub_Linux.tar.gz

@@ -14,6 +14,7 @@ from PyQt6.QtGui import QCursor, QMouseEvent, QWheelEvent, QFontMetrics
 
 from core.models import Channel, EPGProgram
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
+from ui.widgets.stream_buffering_indicator import StreamBufferingIndicator
 
 
 def normalize_to_naive_dt(dt_or_str) -> Optional[datetime]:
@@ -80,6 +81,7 @@ class PlayerControls(QWidget):
         self.has_active_media = False
         self.is_playing = False
         self.is_paused = False
+        self.is_buffering = False
         self.is_error = False
         self.is_muted = False
         self.is_vod = False
@@ -171,6 +173,8 @@ class PlayerControls(QWidget):
     def hide(self):
         self.top_bar.hide()
         self.bottom_bar.hide()
+        if hasattr(self, "buffering_indicator"):
+            self.buffering_indicator.stop()
         super().hide()
 
     def showEvent(self, event):
@@ -186,10 +190,14 @@ class PlayerControls(QWidget):
     def hideEvent(self, event):
         self.top_bar.hide()
         self.bottom_bar.hide()
+        if hasattr(self, "buffering_indicator"):
+            self.buffering_indicator.stop()
         super().hideEvent(event)
 
     def closeEvent(self, event):
         self.hide_bars()
+        if hasattr(self, "buffering_indicator"):
+            self.buffering_indicator.stop()
         super().closeEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -281,7 +289,10 @@ class PlayerControls(QWidget):
         main_layout.addLayout(top_container)
         main_layout.addStretch(1)
 
-        # 1.5 Notification centrale : Flux Indisponible / Erreur
+        # 1.5 Indicateur de chargement & Notification d'erreur centrale
+        self.buffering_indicator = StreamBufferingIndicator(self)
+        self.buffering_indicator.hide()
+
         self.error_banner = QFrame()
         self.error_banner.setObjectName("errorBanner")
         self.error_banner.setStyleSheet("""
@@ -312,6 +323,7 @@ class PlayerControls(QWidget):
 
         eb_container = QHBoxLayout()
         eb_container.addStretch()
+        eb_container.addWidget(self.buffering_indicator)
         eb_container.addWidget(self.error_banner)
         eb_container.addStretch()
 
@@ -777,36 +789,51 @@ class PlayerControls(QWidget):
             self.auto_next_btn.setIcon(get_icon("autoplay", color="#526077"))
             self.auto_next_btn.setToolTip("Lecture automatique de l'épisode suivant : Bloquée (cliquer pour activer)")
 
+    def _update_channel_badge_type(self):
+        """Met à jour le badge selon le type de flux en cours sans flash inutile."""
+        if not self.current_channel:
+            return
+        st = self.current_channel.stream_type
+        if st == "live":
+            self.badge_live.setText("DIRECT")
+            self.badge_live.setStyleSheet("background-color: #ef4444; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
+        elif st == "series":
+            self.badge_live.setText("SÉRIE")
+            self.badge_live.setStyleSheet("background-color: #10b981; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
+        elif st == "replay":
+            self.badge_live.setText("REPLAY")
+            self.badge_live.setStyleSheet("background-color: #818cf8; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
+        elif st in ("movie", "vod"):
+            self.badge_live.setText("FILM")
+            self.badge_live.setStyleSheet("background-color: #6366f1; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
+        else:
+            self.badge_live.setText("VOD")
+            self.badge_live.setStyleSheet("background-color: #6366f1; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
+
     def set_playing_state(self, state: str):
         self.has_active_media = state in ("playing", "paused", "buffering", "error")
         self.is_playing = (state == "playing")
         self.is_paused = (state == "paused")
+        self.is_buffering = (state == "buffering")
         self.is_error = (state == "error")
 
-        if state == "error":
+        if state == "buffering":
+            self.error_banner.hide()
+            self.buffering_indicator.start(delay_ms=1500)
+            self._update_channel_badge_type()
+            self.play_btn.setIcon(get_icon("pause", color="#ffffff"))
+            self.play_btn.setToolTip("Mise en mémoire tampon...")
+        elif state == "error":
+            self.buffering_indicator.stop()
             self.error_banner.show()
             self.badge_live.setText("INDISPONIBLE")
             self.badge_live.setStyleSheet("background-color: #7f1d1d; color: #fca5a5; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; border: 1px solid #ef4444;")
             self.play_btn.setIcon(get_icon("play_arrow", color="#ffffff"))
             self.play_btn.setToolTip("Flux indisponible")
         else:
+            self.buffering_indicator.stop()
             self.error_banner.hide()
-            if self.current_channel:
-                if self.current_channel.stream_type == "live":
-                    self.badge_live.setText("DIRECT")
-                    self.badge_live.setStyleSheet("background-color: #ef4444; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
-                elif self.current_channel.stream_type == "series":
-                    self.badge_live.setText("SÉRIE")
-                    self.badge_live.setStyleSheet("background-color: #10b981; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
-                elif self.current_channel.stream_type == "replay":
-                    self.badge_live.setText("REPLAY")
-                    self.badge_live.setStyleSheet("background-color: #818cf8; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
-                elif self.current_channel.stream_type in ("movie", "vod"):
-                    self.badge_live.setText("FILM")
-                    self.badge_live.setStyleSheet("background-color: #6366f1; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
-                else:
-                    self.badge_live.setText("VOD")
-                    self.badge_live.setStyleSheet("background-color: #6366f1; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
+            self._update_channel_badge_type()
             if self.is_paused or not self.is_playing:
                 self.play_btn.setIcon(get_icon("play_arrow", color="#ffffff"))
                 self.play_btn.setToolTip("Reprendre la lecture (Espace ou clic vidéo)")

@@ -278,7 +278,7 @@ class MPVVideoWidget(QWidget):
                     # Transition : la souris vient de sortir de la zone de la barre de contrôle
                     self._was_mouse_on_controls = False
                     self._last_mouse_pos = global_pos
-                    if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+                    if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False) and not getattr(self.controls, "is_buffering", False):
                         self.osd_timer.start()
                 else:
                     if self._last_mouse_pos is not None:
@@ -291,7 +291,7 @@ class MPVVideoWidget(QWidget):
         elif event_type == QEvent.Type.Leave:
             if getattr(self, "_was_mouse_on_controls", False) and not self._is_mouse_on_controls_bar():
                 self._was_mouse_on_controls = False
-                if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+                if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False) and not getattr(self.controls, "is_buffering", False):
                     self.osd_timer.start()
 
         elif event_type == QEvent.Type.Enter:
@@ -351,7 +351,7 @@ class MPVVideoWidget(QWidget):
         else:
             if getattr(self, "_was_mouse_on_controls", False):
                 self._was_mouse_on_controls = False
-                if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+                if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False) and not getattr(self.controls, "is_buffering", False):
                     self.osd_timer.start()
             else:
                 if self._last_mouse_pos is not None:
@@ -395,7 +395,15 @@ class MPVVideoWidget(QWidget):
             super().keyPressEvent(event)
 
     def _on_player_state_changed(self, state: str):
-        if state in ("playing", "buffering", "paused"):
+        if state == "buffering":
+            self.stack.setCurrentIndex(1)
+            self.video_surface.set_rendering_active(True)
+            self.controls.set_playing_state("buffering")
+            self._sync_geometry()
+            self.controls.show()
+            self.controls.raise_()
+            self.show_mouse_cursor()
+        elif state in ("playing", "paused"):
             self.stack.setCurrentIndex(1)
             self.video_surface.set_rendering_active(True)
             self.controls.set_playing_state(state)
@@ -441,7 +449,7 @@ class MPVVideoWidget(QWidget):
         """Met à jour l'UI plein écran et masque automatiquement le curseur si un média est en cours de lecture."""
         self.controls.set_fullscreen_ui(is_fs)
         if is_fs:
-            if self.controls.has_active_media and not getattr(self.controls, "is_paused", False):
+            if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_buffering", False):
                 self.hide_mouse_cursor()
         else:
             self.show_mouse_cursor()
@@ -462,14 +470,14 @@ class MPVVideoWidget(QWidget):
         if self._is_mouse_on_controls_bar():
             self.osd_timer.stop()
             self._was_mouse_on_controls = True
-        elif not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+        elif not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False) and not getattr(self.controls, "is_buffering", False):
             self.osd_timer.start()
         else:
             self.osd_timer.stop()
 
     def _hide_osd(self):
         """Masque complètement l'OSD après timeout d'inactivité."""
-        if getattr(self.controls, "is_paused", False) or getattr(self.controls, "is_error", False):
+        if getattr(self.controls, "is_paused", False) or getattr(self.controls, "is_error", False) or getattr(self.controls, "is_buffering", False):
             return
 
         # Ne jamais masquer si la souris se trouve sur la barre de contrôle

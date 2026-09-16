@@ -2,6 +2,7 @@
 Contrôleur de lecture vidéo basé sur libmpv et intégré avec les signaux PyQt6.
 """
 
+import time
 from typing import Optional, Dict, Any
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
@@ -55,10 +56,18 @@ class PlayerController(QObject):
         # (la propriété eof-reached peut être notifiée plusieurs fois).
         self._eof_reported = False
 
+        self._last_progress_monotonic: float = 0.0
+        self._stall_start_monotonic: Optional[float] = None
+        self._is_user_paused: bool = False
+
         self._stream_watchdog = QTimer(self)
         self._stream_watchdog.setInterval(12000)  # 12 secondes pour les flux lents/distants
         self._stream_watchdog.setSingleShot(True)
         self._stream_watchdog.timeout.connect(self._on_stream_watchdog_timeout)
+
+        self._stall_monitor = QTimer(self)
+        self._stall_monitor.setInterval(1000)  # 1 seconde de cadence de surveillance
+        self._stall_monitor.timeout.connect(self._on_stall_monitor_tick)
 
         self._init_mpv()
 
@@ -150,6 +159,7 @@ class PlayerController(QObject):
             self._player.observe_property("volume", self._on_volume_changed)
             self._player.observe_property("mute", self._on_mute_changed)
             self._player.observe_property("track-list", self._on_track_list)
+            self._player.observe_property("paused-for-cache", self._on_paused_for_cache)
 
         except Exception as e:
             self.error_occurred.emit(f"Erreur d'initialisation MPV : {e}")
@@ -166,14 +176,61 @@ class PlayerController(QObject):
             self._stream_has_started = True
             if self._stream_watchdog.isActive():
                 self._stream_watchdog.stop()
-            self._set_state("playing")
+            self._last_progress_monotonic = time.monotonic()
+            self._stall_start_monotonic = None
+            if not self._is_user_paused:
+                self._set_state("playing")
 
     def _on_media_format(self, name, value):
         if value:
             self._stream_has_started = True
             if self._stream_watchdog.isActive():
                 self._stream_watchdog.stop()
-            self._set_state("playing")
+            self._last_progress_monotonic = time.monotonic()
+            if not self._is_user_paused:
+                self._set_state("playing")
+
+    def _on_paused_for_cache(self, name, value):
+        """Notifié par MPV lorsque le cache réseau s'épuise ou se reconstitue."""
+        if not self._current_url or not self._player:
+            return
+        if value:
+            # MPV est en attente du buffer réseau -> afficher l'animation de chargement
+            if self._current_state != "paused" and not self._is_user_paused:
+                if self._stall_start_monotonic is None:
+                    self._stall_start_monotonic = time.monotonic()
+                self._set_state("buffering")
+        else:
+            # Le cache réseau est reconstitué -> reprise immédiate
+            if self._current_state == "buffering" and not self._is_user_paused:
+                self._stall_start_monotonic = None
+                self._last_progress_monotonic = time.monotonic()
+                self._set_state("playing")
+
+    def _on_stall_monitor_tick(self):
+        """Surveille continuellement la progression du flux et détecte les gels réseau."""
+        if not self._player or not self._current_url or not self._stream_has_started:
+            return
+        if self._is_user_paused or self._current_state in ("paused", "stopped", "error"):
+            return
+
+        now = time.monotonic()
+        elapsed_since_progress = now - self._last_progress_monotonic
+
+        if self._current_state == "playing":
+            # Si aucune frame n'a progressé depuis au moins 2.8 secondes (freeze / réseau ralenti)
+            if elapsed_since_progress >= 2.8:
+                self._stall_start_monotonic = now
+                self._set_state("buffering")
+        elif self._current_state == "buffering":
+            # Si le flux est en buffering continu
+            if self._stall_start_monotonic is not None:
+                stall_duration = now - self._stall_start_monotonic
+                # Si le gel persiste au-delà de 12 secondes, déclarer le flux indisponible
+                if stall_duration >= 12.0:
+                    self._stall_monitor.stop()
+                    self._set_state("error")
+                    self.error_occurred.emit("Flux indisponible")
 
     def _on_stream_watchdog_timeout(self):
         if not self._player or not self._current_url:
@@ -196,7 +253,10 @@ class PlayerController(QObject):
 
         if is_active:
             self._stream_has_started = True
-            self._set_state("playing")
+            self._last_progress_monotonic = time.monotonic()
+            self._stall_start_monotonic = None
+            if not self._is_user_paused:
+                self._set_state("playing")
         else:
             self._set_state("error")
             self.error_occurred.emit("Flux indisponible")
@@ -208,7 +268,10 @@ class PlayerController(QObject):
             self._stream_has_started = True
             if self._stream_watchdog.isActive():
                 self._stream_watchdog.stop()
-            self._set_state("playing")
+            self._last_progress_monotonic = time.monotonic()
+            self._stall_start_monotonic = None
+            if not self._is_user_paused:
+                self._set_state("playing")
             if abs(val - self._last_time_pos_emit) >= 0.25:  # Max 4 notifications/seconde
                 self._last_time_pos_emit = val
                 self.time_changed.emit(val)
@@ -224,9 +287,14 @@ class PlayerController(QObject):
     def _on_pause_changed(self, name, value):
         if value is not None:
             if value:
+                self._is_user_paused = True
+                self._stall_start_monotonic = None
                 self._set_state("paused")
             else:
+                self._is_user_paused = False
                 self._stream_has_started = True
+                self._last_progress_monotonic = time.monotonic()
+                self._stall_start_monotonic = None
                 self._set_state("playing")
 
     def _on_idle_changed(self, name, value):
@@ -440,7 +508,11 @@ class PlayerController(QObject):
         self._current_url = url
         self._stream_has_started = False
         self._eof_reported = False
+        self._is_user_paused = False
+        self._last_progress_monotonic = time.monotonic()
+        self._stall_start_monotonic = None
         self._stream_watchdog.start()
+        self._stall_monitor.start()
         self._set_state("buffering")
 
         try:
@@ -485,26 +557,40 @@ class PlayerController(QObject):
         except Exception as e:
             if self._stream_watchdog.isActive():
                 self._stream_watchdog.stop()
+            if self._stall_monitor.isActive():
+                self._stall_monitor.stop()
             self.error_occurred.emit(f"Erreur de lecture : {e}")
             self._set_state("error")
 
     def pause(self):
+        self._is_user_paused = True
+        self._stall_start_monotonic = None
         if self._player:
             self._player.pause = True
 
     def resume(self):
+        self._is_user_paused = False
+        self._last_progress_monotonic = time.monotonic()
+        self._stall_start_monotonic = None
         if self._player:
             self._player.pause = False
 
     def toggle_pause(self):
         if self._player:
-            self._player.pause = not self._player.pause
+            if self._player.pause:
+                self.resume()
+            else:
+                self.pause()
 
     def stop(self):
         if self._stream_watchdog.isActive():
             self._stream_watchdog.stop()
+        if self._stall_monitor.isActive():
+            self._stall_monitor.stop()
         self._stream_has_started = False
         self._eof_reported = False
+        self._stall_start_monotonic = None
+        self._is_user_paused = False
         if self._player:
             try:
                 self._player.command("stop")
@@ -519,6 +605,8 @@ class PlayerController(QObject):
 
     def seek(self, seconds: float, relative: bool = False):
         self._eof_reported = False
+        self._last_progress_monotonic = time.monotonic()
+        self._stall_start_monotonic = None
         if self._player:
             try:
                 if relative:
@@ -645,6 +733,10 @@ class PlayerController(QObject):
 
     def cleanup(self):
         """Libère les ressources MPV à la fermeture."""
+        if hasattr(self, "_stream_watchdog") and self._stream_watchdog.isActive():
+            self._stream_watchdog.stop()
+        if hasattr(self, "_stall_monitor") and self._stall_monitor.isActive():
+            self._stall_monitor.stop()
         if self._player:
             try:
                 self._player.stop()

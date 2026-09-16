@@ -94,6 +94,7 @@ hiddenimports += [
     "ui.widgets.series_details_view",
     "ui.widgets.settings_view",
     "ui.widgets.sidebar",
+    "ui.widgets.stream_buffering_indicator",
     "ui.widgets.vod_grid",
     "core",
     "core.database",
