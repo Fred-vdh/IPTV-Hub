@@ -6,8 +6,8 @@ import hashlib
 from collections import OrderedDict, deque
 from pathlib import Path
 from typing import Optional, Dict, Set
-from PyQt6.QtCore import QObject, pyqtSignal, QUrl
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import QObject, pyqtSignal, QUrl, Qt
+from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
 from core.database import get_cache_dir
@@ -190,6 +190,55 @@ class ImageLoader(QObject):
             self.pending_replies[reply] = url
             self.active_downloads += 1
 
+    @staticmethod
+    def _optimize_and_save_image(raw_bytes: bytes, disk_path: Path) -> Optional[QPixmap]:
+        """
+        Décode, redimensionne et compresse intelligemment l'image avant stockage sur disque :
+        - Affiches portrait : max 600px de haut (JPEG 85%)
+        - Bannières/Backdrops paysage : max 1920px de large (JPEG 85%)
+        - Images avec transparence (logos) : max 320x320 (PNG)
+        Retourne le QPixmap optimisé prêt pour l'affichage.
+        """
+        img = QImage()
+        if not img.loadFromData(raw_bytes):
+            return None
+
+        w, h = img.width(), img.height()
+        if w <= 0 or h <= 0:
+            return None
+
+        has_alpha = img.hasAlphaChannel()
+
+        # 1. Calcul des dimensions cibles
+        if has_alpha:
+            max_w, max_h = 320, 320
+        elif w > h:
+            max_w, max_h = 1920, 1080
+        else:
+            max_w, max_h = 400, 600
+
+        # Redimensionnement doux si l'image dépasse les dimensions cibles
+        if w > max_w or h > max_h:
+            img = img.scaled(
+                max_w, max_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+
+        # 2. Sauvegarde compressée sur disque
+        try:
+            if has_alpha:
+                img.save(str(disk_path), "PNG")
+            else:
+                img.save(str(disk_path), "JPEG", 85)
+        except Exception:
+            try:
+                disk_path.write_bytes(raw_bytes)
+            except Exception:
+                pass
+
+        return QPixmap.fromImage(img)
+
     def _on_reply_finished(self, reply: QNetworkReply):
         url = self.pending_replies.pop(reply, None)
         self.active_downloads = max(0, self.active_downloads - 1)
@@ -198,15 +247,9 @@ class ImageLoader(QObject):
             if reply.error() == QNetworkReply.NetworkError.NoError:
                 data = reply.readAll()
                 raw_bytes = bytes(data)
-                # Sauvegarde directe des octets d'origine (< 1ms sans ré-encodage CPU PNG bloquant)
-                try:
-                    disk_path = self._get_cache_path(url)
-                    disk_path.write_bytes(raw_bytes)
-                except Exception:
-                    pass
-
-                pix = QPixmap()
-                if pix.loadFromData(raw_bytes):
+                disk_path = self._get_cache_path(url)
+                pix = self._optimize_and_save_image(raw_bytes, disk_path)
+                if pix and not pix.isNull():
                     self._put_memory_cache(url, pix)
                     self.image_loaded.emit(url, pix)
                 else:
