@@ -19,6 +19,7 @@ class Playlist:
     username: str = ""
     password: str = ""
     epg_url: str = ""
+    user_agent: str = ""
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     channel_count: int = 0
@@ -26,6 +27,10 @@ class Playlist:
     exp_date: Optional[str] = None
     max_connections: Optional[str] = None
     active_cons: Optional[str] = None
+    last_sync_live: Optional[str] = None
+    last_sync_vod: Optional[str] = None
+    last_sync_series: Optional[str] = None
+    last_sync_epg: Optional[str] = None
 
 
 @dataclass
@@ -200,13 +205,20 @@ class WatchHistory:
 @dataclass
 class AppSettings:
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    hwdec: str = "auto"  # "auto", "d3d11va", "nvdec", "no"
+    hwdec: str = "no"  # "no" (CPU fiable/robuste), "auto", "d3d11va", "nvdec"
     buffer_size_mb: int = 32
     default_aspect_ratio: str = "-1"  # "-1" = auto, "16:9", "4:3", etc.
     volume: int = 80
     theme: str = "dark"
     auto_refresh_epg: bool = True
-    epg_refresh_hours: int = 24
+    epg_refresh_days: int = 1
+    auto_sync_live: bool = True
+    sync_interval_live_days: int = 1
+    auto_sync_vod: bool = True
+    sync_interval_vod_days: int = 3
+    auto_sync_series: bool = True
+    sync_interval_series_days: int = 2
+    sync_on_startup: bool = True
     cache_logos: bool = True
     deinterlace: bool = False
     preferred_audio_lang: str = "fre,fra,fr,French,français"
@@ -230,7 +242,41 @@ class AppSettings:
     sync_folder: str = ""
     sync_last_timestamp: str = ""
     auto_play_next_episode: bool = True
+    introdb_intro_skip: bool = True
+    introdb_outro_skip: bool = True
     app_language: str = "fr"
+
+    @property
+    def sync_interval_live_hours(self) -> int:
+        return self.sync_interval_live_days * 24
+
+    @sync_interval_live_hours.setter
+    def sync_interval_live_hours(self, val: int):
+        self.sync_interval_live_days = max(1, round(val / 24))
+
+    @property
+    def sync_interval_vod_hours(self) -> int:
+        return self.sync_interval_vod_days * 24
+
+    @sync_interval_vod_hours.setter
+    def sync_interval_vod_hours(self, val: int):
+        self.sync_interval_vod_days = max(1, round(val / 24))
+
+    @property
+    def sync_interval_series_hours(self) -> int:
+        return self.sync_interval_series_days * 24
+
+    @sync_interval_series_hours.setter
+    def sync_interval_series_hours(self, val: int):
+        self.sync_interval_series_days = max(1, round(val / 24))
+
+    @property
+    def epg_refresh_hours(self) -> int:
+        return self.epg_refresh_days * 24
+
+    @epg_refresh_hours.setter
+    def epg_refresh_hours(self, val: int):
+        self.epg_refresh_days = max(1, round(val / 24))
 
 def clean_category_display_name(name: str) -> str:
     """
@@ -330,4 +376,46 @@ def format_seconds(seconds: float) -> str:
     if hours > 0:
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
+
+
+@dataclass
+class IntroDBSegments:
+    """Timestamps des segments IntroDB pour un épisode de série (ou film)."""
+    imdb_id: str
+    season: int
+    episode: int
+    intro_start: Optional[float] = None
+    intro_end: Optional[float] = None
+    outro_start: Optional[float] = None
+    outro_end: Optional[float] = None
+    confidence: Optional[float] = None
+    submission_count: int = 0
+    updated_at: str = ""
+
+
+@dataclass
+class CustomChannelList:
+    """Représente une liste de chaînes personnalisée (ex: Salon HD, Van SD)."""
+    id: Optional[int] = None
+    name: str = ""
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    sort_order: int = 0
+    item_count: int = 0
+
+
+@dataclass
+class CustomChannelListItem:
+    """Représente une chaîne contenue dans une liste personnalisée."""
+    id: Optional[int] = None
+    list_id: int = 0
+    channel_name: str = ""
+    stream_url: Optional[str] = None
+    stream_id: Optional[str] = None
+    stream_type: str = "live"
+    logo_url: Optional[str] = None
+    group_title: Optional[str] = None
+    order_index: int = 0
+    added_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+
 

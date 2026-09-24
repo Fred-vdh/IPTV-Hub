@@ -4,7 +4,7 @@ personnalisée intégrée, thème gris foncé bleuté, et panneau des paramètre
 """
 
 import time
-from typing import Optional
+from typing import Optional, Any
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QStackedWidget, QMessageBox, QApplication, QSizeGrip, QPushButton,
@@ -23,10 +23,12 @@ from ui.widgets.categories_panel import CategoriesPanel
 from ui.widgets.channel_list import ChannelListPanel
 from ui.widgets.mpv_widget import MPVVideoWidget
 from ui.widgets.settings_view import SettingsView
+from core.auto_sync_manager import AutoSyncManager
 from ui.widgets.epg_view import EPGDialog
 from ui.widgets.epg_timeline import EPGTimelinePanel
 from ui.dialogs.add_playlist import AddPlaylistDialog, PlaylistImportWorker
 from ui.dialogs.manage_playlists_dialog import ManagePlaylistsDialog
+from ui.dialogs.qr_sync_dialog import QRSyncDialog
 from ui.widgets.vod_grid import VODGridView
 from ui.widgets.series_details_view import SeriesDetailsView
 from ui.widgets.movie_details_view import MovieDetailsView
@@ -38,6 +40,7 @@ from ui.widgets.epg_grid_view import EPGGridView
 from ui.widgets.replay_view import ReplayView
 from ui.icons import get_app_logo_icon, get_icon
 from core.i18n import tr, I18nManager
+from ui.dialogs.themed_input_dialog import ThemedInputDialog
 
 
 class MainWindow(QMainWindow):
@@ -107,6 +110,7 @@ class MainWindow(QMainWindow):
             preferred_audio_lang=self.settings.preferred_audio_lang,
             preferred_subtitle_lang=self.settings.preferred_subtitle_lang,
             subtitles_enabled=self.settings.subtitles_enabled,
+            initial_hwdec=self.settings.hwdec,
             parent=self
         )
         self.video_widget.set_player(self.player_controller)
@@ -117,11 +121,18 @@ class MainWindow(QMainWindow):
         self._series_episodes: list = []
         self._current_series_idx: int = -1
         self._stopped_at_episode_end: bool = False
+        self._current_outro_start_sec: Optional[float] = None
+        self._outro_overlay_cancelled: bool = False
+        self._current_intro_start_sec: Optional[float] = None
+        self._current_intro_end_sec: Optional[float] = None
+        self._intro_overlay_cancelled: bool = False
+        self._introdb_worker: Optional[Any] = None
         self.is_fullscreen = False
         self._was_maximized_before_fullscreen = bool(self.settings.window_maximized)
         self._saved_splitter_sizes = [640, 780]
         self._saved_window_geom = QRect(norm_x, norm_y, norm_w, norm_h)
         self._refresh_worker: Optional[PlaylistImportWorker] = None
+        self.auto_sync_manager = AutoSyncManager(self.db, parent=self)
 
         # Variables pour le suivi de la reprise de lecture
         self._current_playback_pos: float = 0.0
@@ -163,6 +174,9 @@ class MainWindow(QMainWindow):
         app_inst = QApplication.instance()
         if app_inst:
             app_inst.installEventFilter(self)
+
+        # Vérification automatique des synchronisations dues au démarrage (différée de 4 secondes pour préserver la fluidité)
+        QTimer.singleShot(4000, self._check_startup_sync)
 
     def _init_ui(self):
         self.central_widget = QFrame(self)
@@ -344,9 +358,16 @@ class MainWindow(QMainWindow):
         self.sidebar.manage_playlists_clicked.connect(self._show_manage_playlists_dialog)
         self.sidebar.settings_clicked.connect(self._open_settings_view)
 
-        # Vue Paramètres
+        # Vue Paramètres & Synchronisation automatique
         self.settings_view.settings_saved.connect(self._on_settings_saved)
         self.settings_view.close_requested.connect(self._close_settings_view)
+        self.settings_view.manual_sync_requested.connect(self._on_manual_sync_requested)
+        self.settings_view.qr_sync_requested.connect(self._open_qr_sync_dialog)
+
+        # Gestionnaire de synchronisation automatique
+        self.auto_sync_manager.sync_started.connect(self._on_auto_sync_started)
+        self.auto_sync_manager.sync_progress.connect(self._on_auto_sync_progress)
+        self.auto_sync_manager.sync_finished.connect(self._on_auto_sync_finished)
 
         # Vue Favoris
         self.favorites_view.movie_selected.connect(self._open_movie_details)
@@ -384,12 +405,17 @@ class MainWindow(QMainWindow):
 
         # Catégories
         self.categories_panel.category_selected.connect(self._on_category_selected)
+        self.categories_panel.custom_list_selected.connect(self._on_custom_list_selected)
         self.categories_panel.manage_categories_requested.connect(self._open_manage_categories_dialog)
+        self.categories_panel.manage_custom_lists_requested.connect(self._open_manage_custom_lists_dialog)
+        self.categories_panel.custom_list_renamed.connect(self._on_custom_list_renamed)
+        self.categories_panel.custom_list_deleted.connect(self._on_custom_list_deleted)
 
         # Liste des chaînes
         self.channel_panel.channel_selected.connect(self._on_channel_selected)
         self.channel_panel.view_epg_requested.connect(self._show_epg_dialog)
         self.channel_panel.toggle_categories_requested.connect(self._toggle_categories_panel)
+        self.channel_panel.custom_lists_changed.connect(self._refresh_custom_lists_in_sidebar)
 
         # Contrôles Vidéo (Zapping, Seek 10s & Plein écran)
         self.video_widget.fullscreen_requested.connect(self.toggle_fullscreen)
@@ -400,8 +426,15 @@ class MainWindow(QMainWindow):
         self.video_widget.controls.forward_10_clicked.connect(lambda: self.player_controller.seek(10, relative=True))
         self.video_widget.controls.auto_next_toggled.connect(self._on_auto_next_toggled)
         self.video_widget.controls.set_auto_next_state(getattr(self.settings, "auto_play_next_episode", True))
+        if hasattr(self.video_widget, "next_ep_overlay"):
+            self.video_widget.next_ep_overlay.play_next_requested.connect(self._on_outro_next_episode_requested)
+            self.video_widget.next_ep_overlay.cancelled.connect(self._on_outro_next_episode_cancelled)
+        if hasattr(self.video_widget, "skip_intro_overlay"):
+            self.video_widget.skip_intro_overlay.skip_intro_requested.connect(self._on_skip_intro_requested)
+            self.video_widget.skip_intro_overlay.cancelled.connect(self._on_skip_intro_cancelled)
 
-        # Suivi de la position et de la durée pour la reprise de lecture
+        # Suivi de l'état, de la position et de la durée pour la reprise de lecture
+        self.player_controller.state_changed.connect(self._on_player_state_changed)
         self.player_controller.time_changed.connect(self._on_player_time_pos_changed)
         self.player_controller.duration_changed.connect(self._on_player_duration_changed)
         # Enchaînement automatique des épisodes de série en fin de lecture
@@ -458,6 +491,10 @@ class MainWindow(QMainWindow):
         playlists = self.db.get_playlists()
         if playlists:
             first_pl = playlists[0]
+            if hasattr(self, "auto_sync_manager"):
+                self.auto_sync_manager.set_active_playlist_id(first_pl.id)
+            if hasattr(self, "settings_view"):
+                self.settings_view.set_playlist_id(first_pl.id)
             self._apply_current_section(first_pl.id)
         else:
             QTimer.singleShot(500, self._prompt_first_playlist)
@@ -539,6 +576,9 @@ class MainWindow(QMainWindow):
         if now - getattr(self, "_last_maximize_toggle_time", 0.0) < 0.35:
             return
         self._is_toggling_maximize = True
+
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "suppress_clicks"):
+            self.video_widget.suppress_clicks(1.0)
 
         self._suspend_osd()
 
@@ -670,6 +710,10 @@ class MainWindow(QMainWindow):
         self.current_channel = None
         self._current_playback_pos = 0.0
         self._current_playback_dur = 0.0
+        if hasattr(self, "auto_sync_manager"):
+            self.auto_sync_manager.set_active_playlist_id(playlist_id)
+        if hasattr(self, "settings_view"):
+            self.settings_view.set_playlist_id(playlist_id)
         self._apply_current_section(playlist_id)
 
     def _on_refresh_active_playlist(self):
@@ -677,6 +721,10 @@ class MainWindow(QMainWindow):
         pl_id = self.get_selected_playlist_id()
         if not pl_id:
             self._show_add_playlist_dialog()
+            return
+
+        if hasattr(self, "auto_sync_manager"):
+            self.auto_sync_manager.trigger_sync(pl_id, "all")
             return
 
         playlist = self.db.get_playlist(pl_id)
@@ -759,13 +807,30 @@ class MainWindow(QMainWindow):
             from core.models import prioritize_categories
             cat_list = prioritize_categories(groups)
 
-        current_selected_cat = getattr(self.categories_panel, "_current_selected_cat", "")
+        prev_custom_list_id = getattr(self.channel_panel, "current_custom_list_id", None) or getattr(self.categories_panel, "_current_selected_custom_list_id", None)
+        current_selected_cat = getattr(self.categories_panel, "_current_selected_cat", "") or getattr(self.channel_panel, "current_selected_category", "")
         available_cat_names = [g[0] for g in cat_list]
         target_cat = current_selected_cat if current_selected_cat in available_cat_names else (cat_list[0][0] if cat_list else "")
 
         # Mettre à jour le panneau des catégories en conservant la catégorie courante
+        custom_lists = []
         if hasattr(self, "categories_panel"):
-            self.categories_panel.set_categories(cat_list, default_selected=target_cat)
+            if self.current_section == "live":
+                self.categories_panel.set_stream_type("live")
+                custom_lists = self.db.get_custom_channel_lists_with_counts(playlist_id=playlist_id)
+                self.categories_panel.set_custom_lists(custom_lists)
+            else:
+                self.categories_panel.set_stream_type(self.current_section)
+                self.categories_panel.set_custom_lists([])
+
+            matching_custom = next((cl for cl in custom_lists if cl[0] == prev_custom_list_id), None) if prev_custom_list_id else None
+            if matching_custom:
+                self.categories_panel.set_categories(cat_list)
+                self.categories_panel.select_custom_list(matching_custom[0], emit_signal=False)
+            else:
+                self.categories_panel.set_categories(cat_list, default_selected=target_cat)
+                if target_cat:
+                    self.categories_panel.select_category(target_cat, emit_signal=False)
 
         # Si l'utilisateur est dans une fiche détaillée ou en lecture (série ou film)
         if current_main_idx in (3, 4) or is_playing_in_details:
@@ -777,9 +842,13 @@ class MainWindow(QMainWindow):
             if is_playing:
                 # Lecture en cours : ne surtout pas basculer l'écran
                 if self.current_section == "live" and hasattr(self, "channel_panel"):
-                    self.channel_panel.set_playlist(playlist_id, stream_type=stream_type if not fav_only else None, favorites_only=fav_only)
-                    if target_cat:
-                        self.channel_panel.set_category(target_cat)
+                    matching_custom = next((cl for cl in custom_lists if cl[0] == prev_custom_list_id), None) if prev_custom_list_id else None
+                    if matching_custom:
+                        self.channel_panel.set_custom_list(matching_custom[0], matching_custom[1])
+                    else:
+                        self.channel_panel.set_playlist(playlist_id, stream_type=stream_type if not fav_only else None, favorites_only=fav_only)
+                        if target_cat:
+                            self.channel_panel.set_category(target_cat)
                 return
 
         # Si l'utilisateur est sur la galerie VOD Films (main_content_stack == 1)
@@ -794,9 +863,13 @@ class MainWindow(QMainWindow):
 
         # Si l'utilisateur est sur la liste des chaînes en direct
         if hasattr(self, "channel_panel"):
-            self.channel_panel.set_playlist(playlist_id, stream_type=stream_type if not fav_only else None, favorites_only=fav_only)
-            if target_cat:
-                self.channel_panel.set_category(target_cat)
+            matching_custom = next((cl for cl in custom_lists if cl[0] == prev_custom_list_id), None) if prev_custom_list_id else None
+            if matching_custom:
+                self.channel_panel.set_custom_list(matching_custom[0], matching_custom[1])
+            else:
+                self.channel_panel.set_playlist(playlist_id, stream_type=stream_type if not fav_only else None, favorites_only=fav_only)
+                if target_cat:
+                    self.channel_panel.set_category(target_cat)
 
     def _on_refresh_error(self, err_msg: str):
         self.title_bar.progress_bar.setVisible(False)
@@ -858,6 +931,53 @@ class MainWindow(QMainWindow):
                 self._last_progress_saved_time = now
                 self._save_current_playback_progress()
 
+        # Détection précise du générique de début (IntroDB) pour le bouton "Passer le générique"
+        intro_start = getattr(self, "_current_intro_start_sec", None)
+        intro_end = getattr(self, "_current_intro_end_sec", None)
+        intro_cancelled = getattr(self, "_intro_overlay_cancelled", False)
+        if (
+            intro_start is not None
+            and intro_end is not None
+            and not intro_cancelled
+            and getattr(self.settings, "introdb_intro_skip", True)
+            and hasattr(self, "video_widget")
+            and hasattr(self.video_widget, "skip_intro_overlay")
+        ):
+            intro_overlay = self.video_widget.skip_intro_overlay
+            if intro_start <= pos < intro_end:
+                if not intro_overlay.isVisible():
+                    intro_overlay.show()
+                    intro_overlay.raise_()
+                    self.video_widget._sync_geometry()
+            elif (pos >= intro_end or pos < intro_start - 2.0) and intro_overlay.isVisible():
+                intro_overlay.hide()
+
+        # Détection précise du générique de fin (IntroDB) pour l'overlay d'enchaînement avec compte à rebours 10s
+        outro_start = getattr(self, "_current_outro_start_sec", None)
+        outro_cancelled = getattr(self, "_outro_overlay_cancelled", False)
+        if (
+            outro_start is not None
+            and not outro_cancelled
+            and getattr(self.settings, "auto_play_next_episode", True)
+            and getattr(self.settings, "introdb_outro_skip", True)
+            and hasattr(self, "video_widget")
+            and hasattr(self.video_widget, "next_ep_overlay")
+        ):
+            overlay = self.video_widget.next_ep_overlay
+            if pos >= outro_start:
+                if not overlay.isVisible():
+                    next_ep = None
+                    if self._series_episodes and 0 <= self._current_series_idx < len(self._series_episodes) - 1:
+                        next_ep = self._series_episodes[self._current_series_idx + 1]
+                    next_title = next_ep.name if next_ep else tr("Épisode suivant")
+                    overlay.setup_episode(next_title, duration_sec=10)
+                    overlay.start_countdown(10)
+                    overlay.raise_()
+                    self.video_widget._sync_geometry()
+            elif pos < outro_start - 2.0 and overlay.isVisible():
+                # Annulation et masquage si l'utilisateur rembobine avant l'outro
+                overlay.reset()
+
     def _on_player_duration_changed(self, dur: float):
         if dur > 0:
             self._current_playback_dur = dur
@@ -887,6 +1007,120 @@ class MainWindow(QMainWindow):
                 position=self._current_playback_pos,
                 duration=self._current_playback_dur
             )
+
+    def _on_player_state_changed(self, state: str):
+        """Met en pause ou reprend le compte à rebours de l'overlay selon l'état du lecteur."""
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "next_ep_overlay"):
+            if state == "paused":
+                self.video_widget.next_ep_overlay.pause_countdown()
+            elif state == "playing":
+                self.video_widget.next_ep_overlay.resume_countdown()
+
+    def _prepare_introdb_for_current_episode(self):
+        """Recherche en tâche de fond les marqueurs IntroDB pour l'épisode de série lancé."""
+        self._current_outro_start_sec = None
+        self._outro_overlay_cancelled = False
+        self._current_intro_start_sec = None
+        self._current_intro_end_sec = None
+        self._intro_overlay_cancelled = False
+
+        if hasattr(self, "video_widget"):
+            if hasattr(self.video_widget, "next_ep_overlay"):
+                self.video_widget.next_ep_overlay.reset()
+            if hasattr(self.video_widget, "skip_intro_overlay"):
+                self.video_widget.skip_intro_overlay.hide()
+
+        if not self.current_channel or self.current_channel.stream_type != "series":
+            return
+
+        has_intro_enabled = bool(getattr(self.settings, "introdb_intro_skip", True))
+        has_next_ep = bool(self._series_episodes and 0 <= self._current_series_idx < len(self._series_episodes) - 1)
+        has_outro_enabled = bool(getattr(self.settings, "auto_play_next_episode", True) and getattr(self.settings, "introdb_outro_skip", True) and has_next_ep)
+
+        if not has_intro_enabled and not has_outro_enabled:
+            return
+
+        series_name = getattr(self.current_channel, "series_name", "") or self.current_channel.name
+        from core.introdb_client import parse_episode_season_and_num, IntroDBWorker
+        season, episode = parse_episode_season_and_num(
+            self.current_channel.name,
+            self.current_channel.stream_url or ""
+        )
+
+        if getattr(self, "_introdb_worker", None) and self._introdb_worker.isRunning():
+            try:
+                self._introdb_worker.terminate()
+            except Exception:
+                pass
+
+        self._introdb_worker = IntroDBWorker(
+            series_name=series_name,
+            season=season,
+            episode=episode,
+            db=self.db,
+            parent=self
+        )
+        self._introdb_worker.segments_ready.connect(self._on_introdb_segments_ready)
+        self._introdb_worker.start()
+
+    def _on_introdb_segments_ready(self, segments):
+        """Appelé lorsque les marqueurs IntroDB ont été récupérés (ou introuvables)."""
+        if not segments:
+            self._current_outro_start_sec = None
+            self._current_intro_start_sec = None
+            self._current_intro_end_sec = None
+            return
+
+        # Marqueur générique de fin certifié
+        has_next_ep = bool(self._series_episodes and 0 <= self._current_series_idx < len(self._series_episodes) - 1)
+        if has_next_ep and segments.outro_start and segments.outro_start > 0:
+            self._current_outro_start_sec = float(segments.outro_start)
+        else:
+            self._current_outro_start_sec = None
+
+        # Marqueur générique de début certifié
+        if segments.intro_start is not None and segments.intro_end is not None and segments.intro_end > segments.intro_start:
+            self._current_intro_start_sec = float(segments.intro_start)
+            self._current_intro_end_sec = float(segments.intro_end)
+        else:
+            self._current_intro_start_sec = None
+            self._current_intro_end_sec = None
+
+    def _on_skip_intro_requested(self):
+        """L'utilisateur a cliqué sur 'Passer le générique'."""
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "skip_intro_overlay"):
+            self.video_widget.skip_intro_overlay.hide()
+        if self._current_intro_end_sec is not None and self._current_intro_end_sec > 0:
+            self.player_controller.seek(self._current_intro_end_sec, relative=False)
+
+    def _on_skip_intro_cancelled(self):
+        """L'utilisateur a cliqué sur '✕' pour laisser le générique de début tourner sans être dérangé."""
+        self._intro_overlay_cancelled = True
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "skip_intro_overlay"):
+            self.video_widget.skip_intro_overlay.hide()
+
+    def _on_outro_next_episode_requested(self):
+        """Déclenché par le widget OSD quand le compte à rebours de 10s expire ou sur clic 'Lire maintenant'."""
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "next_ep_overlay"):
+            self.video_widget.next_ep_overlay.reset()
+
+        if self.current_channel and self._current_playback_dur > 0:
+            self.db.save_playback_progress(
+                channel_id=self.current_channel.id,
+                stream_url=self.current_channel.stream_url,
+                channel_name=self.current_channel.name,
+                position=self._current_playback_dur,
+                duration=self._current_playback_dur
+            )
+
+        self.player_controller.stop()
+        self._play_next_series_episode()
+
+    def _on_outro_next_episode_cancelled(self):
+        """L'utilisateur a cliqué sur 'Annuler' pour laisser le générique tourner jusqu'au bout."""
+        self._outro_overlay_cancelled = True
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "next_ep_overlay"):
+            self.video_widget.next_ep_overlay.reset()
 
     def _on_series_episode_started(self, channel: Channel):
         """Enregistre l'épisode de série en cours de lecture dans l'historique."""
@@ -962,6 +1196,8 @@ class MainWindow(QMainWindow):
                 target_cat = channel.group_title or (cat_list[0][0] if cat_list else "")
 
             self.categories_panel.set_title("Catégories en direct")
+            custom_lists = self.db.get_custom_channel_lists_with_counts(playlist_id=playlist_id)
+            self.categories_panel.set_custom_lists(custom_lists)
             self.categories_panel.set_categories(cat_list, default_selected=target_cat)
             self.categories_panel.select_category(target_cat, emit_signal=False)
 
@@ -1011,22 +1247,27 @@ class MainWindow(QMainWindow):
             extra_headers=channel.extra_headers
         )
         self.video_widget.setFocus()
+        self._prepare_introdb_for_current_episode()
 
     def _play_next_channel(self):
         if not self.current_channel:
             return
 
         if self.current_channel.stream_type == "series":
-            # 1. Marquer l'épisode quitté comme lu à 100%
+            # Ne marquer l'épisode quitté comme lu à 100% QUE s'il a été visionné jusqu'à la fin
             old_ep = self.current_channel
-            dur = self._current_playback_dur if self._current_playback_dur > 0 else (self._current_playback_pos if self._current_playback_pos > 0 else 3600.0)
-            self.db.save_playback_progress(
-                channel_id=old_ep.id,
-                stream_url=old_ep.stream_url,
-                channel_name=old_ep.name,
-                position=dur,
-                duration=dur
-            )
+            dur = self._current_playback_dur
+            pos = self._current_playback_pos
+            if dur > 60 and (pos >= dur * 0.90 or (dur >= 180 and pos >= 120 and (dur - pos) <= 60)):
+                self.db.save_playback_progress(
+                    channel_id=old_ep.id,
+                    stream_url=old_ep.stream_url,
+                    channel_name=old_ep.name,
+                    position=dur,
+                    duration=dur
+                )
+            else:
+                self._save_current_playback_progress()
 
             # 2. Déterminer l'épisode suivant
             if self._series_episodes and 0 <= self._current_series_idx < len(self._series_episodes) - 1:
@@ -1090,6 +1331,8 @@ class MainWindow(QMainWindow):
                 self.series_details_view.refresh_progress()
             return False
 
+        if hasattr(self, "player_controller") and self.player_controller:
+            self.player_controller.stop()
         self.current_channel = None
         self._current_playback_pos = 0.0
         self._current_playback_dur = 0.0
@@ -1129,21 +1372,41 @@ class MainWindow(QMainWindow):
           Sur le tout dernier épisode, on ne fait rien (la lecture s'arrête).
         - Films et TV en direct : rien de particulier (la lecture s'arrête).
         """
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "next_ep_overlay"):
+            self.video_widget.next_ep_overlay.reset()
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "skip_intro_overlay"):
+            self.video_widget.skip_intro_overlay.hide()
         if not self.current_channel:
             return
         # Ne concerne QUE les séries : jamais les films ni la TV en direct.
         if self.current_channel.stream_type != "series":
             return
 
+        pos = self._current_playback_pos
+        dur = self._current_playback_dur
+
+        # Sécurité critique : vérifier que l'on est RÉELLEMENT à la fin du fichier vidéo
+        # avant de marquer à 100% et d'enchaîner. Un arrêt utilisateur, un EOF MPV prématuré
+        # ou une interruption réseau ne doit JAMAIS marquer un épisode non terminé comme lu.
+        is_truly_at_end = (
+            dur > 60 and (
+                pos >= dur * 0.85
+                or (dur >= 180 and pos >= 120 and (dur - pos) <= 60)
+            )
+        )
+        if not is_truly_at_end:
+            self._save_current_playback_progress()
+            return
+
         # 1. Marquer l'épisode qui vient de se terminer comme vu à 100%
         old_ep = self.current_channel
-        dur = self._current_playback_dur if self._current_playback_dur > 0 else (self._current_playback_pos if self._current_playback_pos > 0 else 3600.0)
+        effective_dur = dur if dur > 0 else (pos if pos > 0 else 3600.0)
         self.db.save_playback_progress(
             channel_id=old_ep.id,
             stream_url=old_ep.stream_url,
             channel_name=old_ep.name,
-            position=dur,
-            duration=dur
+            position=effective_dur,
+            duration=effective_dur
         )
 
         # Si l'enchaînement automatique est désactivé, arrêter la lecture ici et mémoriser l'état
@@ -1355,24 +1618,35 @@ class MainWindow(QMainWindow):
             self._load_categories_and_channels()
 
 
-    def _load_categories_and_channels(self):
+    def _load_categories_and_channels(self, preferred_custom_list_id: Optional[int] = None):
         playlist_id = self.get_selected_playlist_id()
         stream_type = self.current_section if self.current_section in ("live", "vod", "series") else "live"
         if stream_type == "vod":
             stream_type = "movie"
         fav_only = (self.current_section == "favorites")
 
-        # Titre des catégories
+        # Titre et type de flux des catégories
         if self.current_section == "live":
+            self.categories_panel.set_stream_type("live")
             self.categories_panel.set_title("Catégories en direct")
         elif self.current_section == "vod":
+            self.categories_panel.set_stream_type("movie")
             self.categories_panel.set_title("Catégories de films")
         elif self.current_section == "series":
+            self.categories_panel.set_stream_type("series")
             self.categories_panel.set_title("Catégories Séries")
         elif fav_only:
+            self.categories_panel.set_stream_type("favorites")
             self.categories_panel.set_title("Catégories Favoris")
         else:
+            self.categories_panel.set_stream_type(self.current_section)
             self.categories_panel.set_title("Catégories")
+
+        # Mémoriser la sélection précédente avant rechargement
+        prev_custom_list_id = preferred_custom_list_id if preferred_custom_list_id is not None else (
+            getattr(self.channel_panel, "current_custom_list_id", None) or getattr(self.categories_panel, "_current_selected_custom_list_id", None)
+        )
+        prev_cat = getattr(self.categories_panel, "_current_selected_cat", "") or getattr(self.channel_panel, "current_selected_category", "")
 
         # Groupes
         groups = self.db.get_groups(
@@ -1390,16 +1664,45 @@ class MainWindow(QMainWindow):
         default_cat = cat_list[0][0] if cat_list else ""
 
         if self.current_section == "vod":
-            self.categories_panel.set_categories(cat_list, default_selected=default_cat)
-            self.vod_grid_view.set_playlist_and_category(playlist_id, default_cat)
+            self.categories_panel.set_custom_lists([])
+            target_cat = prev_cat if (prev_cat and any(c[0] == prev_cat for c in cat_list)) else default_cat
+            self.categories_panel.set_categories(cat_list, default_selected=target_cat)
+            if target_cat:
+                self.categories_panel.select_category(target_cat, emit_signal=False)
+            self.vod_grid_view.set_playlist_and_category(playlist_id, target_cat)
         elif self.current_section == "series":
-            self.categories_panel.set_categories(cat_list, default_selected=default_cat)
-            self.series_grid_view.set_playlist_and_category(playlist_id, default_cat)
+            self.categories_panel.set_custom_lists([])
+            target_cat = prev_cat if (prev_cat and any(c[0] == prev_cat for c in cat_list)) else default_cat
+            self.categories_panel.set_categories(cat_list, default_selected=target_cat)
+            if target_cat:
+                self.categories_panel.select_category(target_cat, emit_signal=False)
+            self.series_grid_view.set_playlist_and_category(playlist_id, target_cat)
         else:
-            self.categories_panel.set_categories(cat_list, default_selected=default_cat)
-            self.channel_panel.set_playlist(playlist_id, stream_type=stream_type if not fav_only else None, favorites_only=fav_only)
-            if default_cat:
-                self.channel_panel.set_category(default_cat)
+            if self.current_section == "live":
+                custom_lists = self.db.get_custom_channel_lists_with_counts(playlist_id=playlist_id)
+                self.categories_panel.set_custom_lists(custom_lists)
+            else:
+                custom_lists = []
+                self.categories_panel.set_custom_lists([])
+
+            matching_custom = next((cl for cl in custom_lists if cl[0] == prev_custom_list_id), None) if prev_custom_list_id else None
+
+            if matching_custom:
+                custom_id, custom_name, _ = matching_custom
+                self.categories_panel.set_categories(cat_list)
+                self.categories_panel.select_custom_list(custom_id, emit_signal=False)
+                self.channel_panel.current_playlist_id = playlist_id
+                self.channel_panel.current_stream_type = stream_type if not fav_only else None
+                self.channel_panel.favorites_only = fav_only
+                self.channel_panel.set_custom_list(custom_id, custom_name)
+            else:
+                target_cat = prev_cat if (prev_cat and any(c[0] == prev_cat for c in cat_list)) else default_cat
+                self.categories_panel.set_categories(cat_list, default_selected=target_cat)
+                if target_cat:
+                    self.categories_panel.select_category(target_cat, emit_signal=False)
+                self.channel_panel.set_playlist(playlist_id, stream_type=stream_type if not fav_only else None, favorites_only=fav_only)
+                if target_cat:
+                    self.channel_panel.set_category(target_cat)
 
     def _on_search_text_changed(self, text: str):
         query = text.strip()
@@ -1546,10 +1849,15 @@ class MainWindow(QMainWindow):
             )
             from core.models import prioritize_categories
             cat_list = prioritize_categories(groups)
+            self.categories_panel.set_stream_type("series")
             self.categories_panel.set_title("Catégories Séries")
+            self.categories_panel.set_custom_lists([])
             self.categories_panel.set_categories(cat_list, default_selected=cat_to_select)
-        elif channel.group_title:
-            self.categories_panel.select_category(channel.group_title, emit_signal=False)
+        else:
+            self.categories_panel.set_stream_type("series")
+            self.categories_panel.set_custom_lists([])
+            if channel.group_title:
+                self.categories_panel.select_category(channel.group_title, emit_signal=False)
 
         self.categories_panel.show()
         self.channel_panel.hide()
@@ -1694,6 +2002,7 @@ class MainWindow(QMainWindow):
         )
         self.video_widget._sync_geometry()
         self.video_widget._show_osd()
+        self._prepare_introdb_for_current_episode()
 
     def _stop_series_details_playback(self):
         """Arrête la lecture d'un épisode dans la fiche détaillée de série et remet le lecteur en place."""
@@ -1745,10 +2054,15 @@ class MainWindow(QMainWindow):
             )
             from core.models import prioritize_categories
             cat_list = prioritize_categories(groups)
+            self.categories_panel.set_stream_type("movie")
             self.categories_panel.set_title("Catégories de films")
+            self.categories_panel.set_custom_lists([])
             self.categories_panel.set_categories(cat_list, default_selected=cat_to_select)
-        elif channel.group_title:
-            self.categories_panel.select_category(channel.group_title, emit_signal=False)
+        else:
+            self.categories_panel.set_stream_type("movie")
+            self.categories_panel.set_custom_lists([])
+            if channel.group_title:
+                self.categories_panel.select_category(channel.group_title, emit_signal=False)
 
         self.categories_panel.show()
         self.channel_panel.hide()
@@ -2088,6 +2402,8 @@ class MainWindow(QMainWindow):
         if section_key == "manage_playlists":
             self._show_manage_playlists_dialog()
         elif section_key in ("live", "vod", "series", "favorites", "history", "epg", "recently_added"):
+            if section_key == "history" and hasattr(self, "history_view"):
+                self.history_view._set_stream_type("all")
             self.sidebar.select_section(section_key)
 
     def _on_dashboard_playlist_switched(self, playlist: Playlist):
@@ -2097,17 +2413,87 @@ class MainWindow(QMainWindow):
             self._on_playlist_changed(playlist.id)
 
 
-    def _open_manage_categories_dialog(self):
+    def _open_manage_categories_dialog(self, initial_tab: int = 0):
         from ui.dialogs.manage_categories_dialog import ManageCategoriesDialog
         playlist_id = self.get_selected_playlist_id()
         stream_type = self.current_section if self.current_section in ("live", "vod", "series") else "live"
         if stream_type == "vod":
             stream_type = "movie"
-        dlg = ManageCategoriesDialog(self.db, playlist_id, stream_type, self)
-        dlg.categories_updated.connect(self._load_categories_and_channels)
-        if stream_type == "live":
-            dlg.categories_updated.connect(self.epg_grid_view.refresh_view)
+        active_custom_list_id = getattr(self.channel_panel, "current_custom_list_id", None) or getattr(self.categories_panel, "_current_selected_custom_list_id", None)
+        dlg = ManageCategoriesDialog(
+            self.db, playlist_id, stream_type, self,
+            initial_tab=initial_tab,
+            initial_custom_list_id=active_custom_list_id
+        )
+
+        def _on_updated():
+            target_list_id = active_custom_list_id
+            if dlg.tabs.currentIndex() == 1:
+                dlg_list_id = dlg.get_current_custom_list_id()
+                if dlg_list_id is not None:
+                    target_list_id = dlg_list_id
+            self._load_categories_and_channels(preferred_custom_list_id=target_list_id)
+            self._refresh_custom_lists_in_sidebar()
+            if stream_type == "live":
+                self.epg_grid_view.refresh_view()
+
+        dlg.categories_updated.connect(_on_updated)
         dlg.exec()
+
+    def _on_custom_list_selected(self, list_id: int, list_name: str):
+        """Affiche les chaînes d'une liste de chaînes personnalisée dans ChannelListPanel."""
+        self.channel_panel.show()
+        self.main_content_stack.setCurrentIndex(0)
+        self.channel_panel.set_custom_list(list_id, list_name)
+
+    def _open_manage_custom_lists_dialog(self):
+        """Ouvre la boîte de dialogue sur l'onglet des listes personnalisées."""
+        self._open_manage_categories_dialog(initial_tab=1)
+
+    def _on_custom_list_renamed(self, list_id: int, old_name: str):
+        """Renomme une liste de chaînes personnalisée depuis CategoriesPanel."""
+        new_name, ok = ThemedInputDialog.get_text(
+            self,
+            title=tr("Renommer la liste"),
+            label=tr("Nouveau nom :"),
+            text=old_name,
+            icon_name="edit"
+        )
+        if ok and new_name and new_name.strip() and new_name.strip() != old_name:
+            success = self.db.rename_custom_channel_list(list_id, new_name.strip())
+            if success:
+                self._refresh_custom_lists_in_sidebar()
+                if self.channel_panel.current_custom_list_id == list_id:
+                    self.channel_panel.set_custom_list(list_id, new_name.strip())
+            else:
+                QMessageBox.warning(self, tr("Erreur"), tr("Ce nom de liste existe déjà."))
+
+    def _on_custom_list_deleted(self, list_id: int, name: str):
+        """Supprime une liste personnalisée depuis CategoriesPanel."""
+        confirm = QMessageBox.question(
+            self,
+            tr("Supprimer la liste"),
+            tr("Êtes-vous sûr de vouloir supprimer la liste '{name}' ?\nLes chaînes associées ne seront pas effacées de votre playlist.").format(name=name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            self.db.delete_custom_channel_list(list_id)
+            self._refresh_custom_lists_in_sidebar()
+            if self.channel_panel.current_custom_list_id == list_id:
+                self.channel_panel.set_category("Toutes les chaînes")
+                self.categories_panel.select_category("Toutes les chaînes", emit_signal=False)
+
+    def _refresh_custom_lists_in_sidebar(self):
+        """Rafraîchit les listes personnalisées et compteurs dans CategoriesPanel."""
+        if hasattr(self, "categories_panel"):
+            if self.current_section == "live":
+                self.categories_panel.set_stream_type("live")
+                custom_lists = self.db.get_custom_channel_lists_with_counts(playlist_id=self.get_selected_playlist_id())
+                self.categories_panel.set_custom_lists(custom_lists)
+            else:
+                self.categories_panel.set_stream_type(self.current_section)
+                self.categories_panel.set_custom_lists([])
 
     def _load_dashboard_view(self, playlist_id: Optional[int]):
         """Charge le tableau de bord avec aperçu des flux et statistiques."""
@@ -2143,6 +2529,7 @@ class MainWindow(QMainWindow):
         self._current_playback_pos = 0.0
         self._current_playback_dur = 0.0
         if hasattr(self, "settings_view"):
+            self.settings_view.set_playlist_id(self.get_selected_playlist_id())
             self.settings_view._load_values()
         self.content_stack.setCurrentIndex(1)
         self.sidebar.btn_settings.setChecked(True)
@@ -2169,6 +2556,61 @@ class MainWindow(QMainWindow):
         if self.video_widget.controls.is_playing:
             self.video_widget._show_osd()
 
+    def _check_startup_sync(self):
+        """Vérifie au démarrage s'il y a une ou plusieurs synchronisations échues à exécuter."""
+        if not getattr(self.settings, "sync_on_startup", True):
+            return
+        pl_id = self.get_selected_playlist_id()
+        if pl_id and hasattr(self, "auto_sync_manager"):
+            self.auto_sync_manager.check_and_run_due_syncs(pl_id)
+
+    def _on_manual_sync_requested(self, sync_type: str):
+        """Déclenche immédiatement une synchronisation demandée depuis l'écran des paramètres."""
+        pl_id = self.get_selected_playlist_id()
+        if not pl_id or not hasattr(self, "auto_sync_manager"):
+            return
+        self.auto_sync_manager.trigger_sync(pl_id, sync_type)
+
+    def _on_auto_sync_started(self, sync_type: str, pl_name: str):
+        """Notification du lancement d'une synchronisation automatique ou manuelle en haut de l'écran."""
+        self.title_bar.progress_bar.setVisible(True)
+        self.title_bar.refresh_btn.setEnabled(False)
+
+        if sync_type == "all":
+            self.title_bar.status_label.setText(tr("Synchronisation de '{name}'...", name=pl_name))
+        else:
+            label_map = {
+                "live": tr("Direct"),
+                "vod": tr("Films VOD"),
+                "series": tr("Séries"),
+                "epg": tr("EPG"),
+                "all": tr("Tout")
+            }
+            type_str = label_map.get(sync_type, sync_type)
+            self.title_bar.status_label.setText(tr("Synchronisation de '{name}' ({type})...", name=pl_name, type=type_str))
+
+    def _on_auto_sync_progress(self, sync_type: str, msg: str):
+        """Mise à jour du statut textuel dans la barre de titre en haut de l'écran."""
+        self.title_bar.status_label.setText(msg)
+
+    def _on_auto_sync_finished(self, sync_type: str, playlist_id: int, success: bool, msg: str):
+        """Traitement de la fin d'une synchronisation : feedback en haut de l'écran identique au manuel."""
+        self.title_bar.progress_bar.setVisible(False)
+        self.title_bar.refresh_btn.setEnabled(True)
+
+        if success:
+            self.title_bar.status_label.setText(tr("Synchronisation réussie !"))
+            QTimer.singleShot(3000, lambda: self.title_bar.status_label.setText(""))
+
+            # Rafraîchir les listes et les vues en douceur sans jamais perturber la lecture en cours
+            self.refresh_playlists_combo(select_playlist_id=playlist_id)
+            self._refresh_active_views_data(playlist_id)
+            if hasattr(self, "settings_view"):
+                self.settings_view.refresh_sync_status(playlist_id)
+        else:
+            self.title_bar.status_label.setText(f"⚠️ {tr('Erreur de synchronisation')} : {msg}")
+            QTimer.singleShot(5000, lambda: self.title_bar.status_label.setText(""))
+
     def _on_settings_saved(self):
         self.settings = self.db.get_settings()
         self.player_controller.set_hwdec(self.settings.hwdec)
@@ -2192,6 +2634,10 @@ class MainWindow(QMainWindow):
                 self.settings_view.auto_play_next_cb.blockSignals(False)
         except Exception:
             pass
+
+        if not enabled:
+            if hasattr(self, "video_widget") and hasattr(self.video_widget, "next_ep_overlay"):
+                self.video_widget.next_ep_overlay.reset()
 
         if enabled and getattr(self, "_stopped_at_episode_end", False):
             self._play_next_series_episode()
@@ -2281,6 +2727,9 @@ class MainWindow(QMainWindow):
             return
         self._is_toggling_fullscreen = True
         self._last_fullscreen_toggle_time = now
+
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "suppress_clicks"):
+            self.video_widget.suppress_clicks(1.2)
 
         is_actually_fs = bool(getattr(self, "is_fullscreen", False) or self.isFullScreen())
 
@@ -2379,6 +2828,9 @@ class MainWindow(QMainWindow):
         is_actually_fs = bool(getattr(self, "is_fullscreen", False) or self.isFullScreen())
         if not is_actually_fs:
             return
+
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "suppress_clicks"):
+            self.video_widget.suppress_clicks(1.2)
 
         self._suspend_osd()
         self.is_fullscreen = False
@@ -2732,6 +3184,38 @@ class MainWindow(QMainWindow):
         self.refresh_playlists_combo()
         pl_id = self.get_selected_playlist_id()
         self._refresh_active_views_data(pl_id)
+
+    def _open_qr_sync_dialog(self):
+        """Ouvre la boîte de dialogue de synchronisation locale par QR Code."""
+        dlg = QRSyncDialog(self.db, parent=self)
+        dlg.sync_completed.connect(self._on_qr_sync_completed)
+        dlg.exec()
+
+    def _on_qr_sync_completed(self, stats: dict):
+        """Réactualise immédiatement toutes les vues de l'interface après une synchronisation réussie."""
+        self.refresh_playlists_combo()
+        pl_id = self.get_selected_playlist_id()
+        self._refresh_active_views_data(pl_id)
+
+        # Mettre à jour également les composants globaux
+        if hasattr(self, "vod_grid_view") and hasattr(self.vod_grid_view, "update_all_progress_bars"):
+            self.vod_grid_view.update_all_progress_bars()
+        if hasattr(self, "dashboard_view") and hasattr(self.dashboard_view, "refresh_view"):
+            self.dashboard_view.refresh_view()
+
+        # Notification visuelle dans la barre de titre
+        msg_parts = []
+        if stats.get("playlists_synced", 0) > 0:
+            msg_parts.append(f"{stats['playlists_synced']} liste(s)")
+        if stats.get("favorites_added", 0) > 0:
+            msg_parts.append(f"{stats['favorites_added']} favori(s)")
+        if stats.get("progress_updated", 0) > 0:
+            msg_parts.append(f"{stats['progress_updated']} reprise(s)")
+
+        detail = f" ({', '.join(msg_parts)})" if msg_parts else ""
+        if hasattr(self, "title_bar") and hasattr(self.title_bar, "status_label"):
+            self.title_bar.status_label.setText(f"Synchronisation réussie{detail}")
+            QTimer.singleShot(5000, lambda: self.title_bar.status_label.setText(""))
 
     def _show_epg_dialog(self, channel: Channel):
         dlg = EPGDialog(channel, self.db, parent=self)

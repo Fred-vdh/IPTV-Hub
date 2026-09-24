@@ -58,7 +58,6 @@ class SidebarButton(QPushButton):
 
 
 class Sidebar(QFrame):
-    # 'dashboard', 'favorites', 'history', 'live', 'vod', 'series', 'recently_added'
     section_changed = pyqtSignal(str)
     manage_playlists_clicked = pyqtSignal()
     settings_clicked = pyqtSignal()

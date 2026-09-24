@@ -312,6 +312,12 @@ class TestI18n(unittest.TestCase):
             self.assertEqual(tb.pl_label.text(), "Liste :")
             self.assertEqual(fav.title_label.text(), "Favoris")
         finally:
+            for w in [tb, fav, hist, dash]:
+                try:
+                    w.close()
+                    w.deleteLater()
+                except Exception:
+                    pass
             self.i18n.set_language("fr")
             if os.path.exists(temp_db):
                 try:
@@ -355,6 +361,11 @@ class TestI18n(unittest.TestCase):
             self.assertIn("Watch channel", epg.hero_card.play_btn.text())
 
         finally:
+            try:
+                epg.close()
+                epg.deleteLater()
+            except Exception:
+                pass
             self.i18n.set_language("fr")
             if os.path.exists(temp_db):
                 try:
@@ -370,11 +381,14 @@ class TestI18n(unittest.TestCase):
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             temp_db = f.name
+        vod = None
+        settings_view = None
         try:
             db = Database(temp_db)
 
             # 1. Date d'expiration
-            future_ts = 1790000000  # un timestamp futur
+            import time
+            future_ts = int(time.time()) + 86400 * 30  # 30 jours dans le futur
             self.i18n.set_language("fr")
             exp_fr = _format_exp_date(str(future_ts))
             self.i18n.set_language("en")
@@ -430,6 +444,13 @@ class TestI18n(unittest.TestCase):
             self.assertEqual(settings_view.btn_import_config.text().strip(), "Load configuration file...")
 
         finally:
+            for w in [vod, settings_view]:
+                if w:
+                    try:
+                        w.close()
+                        w.deleteLater()
+                    except Exception:
+                        pass
             self.i18n.set_language("fr")
             if os.path.exists(temp_db):
                 try:
@@ -445,6 +466,9 @@ class TestI18n(unittest.TestCase):
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             temp_db = f.name
+        epg_grid = None
+        ch_list = None
+        timeline = None
         try:
             db = Database(temp_db)
 
@@ -480,6 +504,13 @@ class TestI18n(unittest.TestCase):
             self.assertEqual(timeline.channel_title_label.text(), "Guide des programmes")
 
         finally:
+            for w in [epg_grid, ch_list, timeline]:
+                if w:
+                    try:
+                        w.close()
+                        w.deleteLater()
+                    except Exception:
+                        pass
             self.i18n.set_language("fr")
             if os.path.exists(temp_db):
                 try:

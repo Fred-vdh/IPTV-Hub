@@ -12,6 +12,8 @@ from PyQt6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent, QCursor
 from core.player_controller import PlayerController
 from ui.widgets.player_controls import PlayerControls
 from ui.widgets.gl_video_surface import GLVideoSurface
+from ui.widgets.next_episode_overlay import NextEpisodeOverlay
+from ui.widgets.skip_intro_overlay import SkipIntroOverlay
 from ui.icons import get_pixmap
 
 
@@ -76,7 +78,15 @@ class MPVVideoWidget(QWidget):
         self.controls.setMouseTracking(True)
         self.controls.hide()
 
-        # 3. Timer pour masquer l'OSD après 3.5 secondes d'inactivité
+        # 3. Overlay escamotable de passage à l'épisode suivant (IntroDB)
+        self.next_ep_overlay = NextEpisodeOverlay(self)
+        self.next_ep_overlay.hide()
+
+        # 3b. Overlay escamotable pour passer le générique de début (IntroDB)
+        self.skip_intro_overlay = SkipIntroOverlay(self)
+        self.skip_intro_overlay.hide()
+
+        # 4. Timer pour masquer l'OSD après 3.5 secondes d'inactivité
         self.osd_timer = QTimer(self)
         self.osd_timer.setInterval(3500)
         self.osd_timer.setSingleShot(True)
@@ -87,7 +97,9 @@ class MPVVideoWidget(QWidget):
         self._click_timer.setSingleShot(True)
         self._click_timer.timeout.connect(self._handle_single_click)
         self._ignore_next_release = False
+        self._mouse_pressed_on_video = False
         self._last_dblclick_time: float = 0.0
+        self._suppress_click_until: float = 0.0
 
         self._last_mouse_pos: Optional[QPoint] = None
         self._osd_suspended: bool = False
@@ -100,13 +112,22 @@ class MPVVideoWidget(QWidget):
             self._connect_player()
 
     def _install_controls_event_filters(self):
-        """Installe le filtre d'événements sur la fenêtre de contrôle et tous ses sous-widgets."""
-        if not hasattr(self, "controls") or not self.controls:
-            return
-        self.controls.installEventFilter(self)
-        for w in self.controls.findChildren(QWidget):
-            w.setMouseTracking(True)
-            w.installEventFilter(self)
+        """Installe le filtre d'événements sur la fenêtre de contrôle, l'overlay et tous leurs sous-widgets."""
+        if hasattr(self, "controls") and self.controls:
+            self.controls.installEventFilter(self)
+            for w in self.controls.findChildren(QWidget):
+                w.setMouseTracking(True)
+                w.installEventFilter(self)
+        if hasattr(self, "next_ep_overlay") and self.next_ep_overlay:
+            self.next_ep_overlay.installEventFilter(self)
+            for w in self.next_ep_overlay.findChildren(QWidget):
+                w.setMouseTracking(True)
+                w.installEventFilter(self)
+        if hasattr(self, "skip_intro_overlay") and self.skip_intro_overlay:
+            self.skip_intro_overlay.installEventFilter(self)
+            for w in self.skip_intro_overlay.findChildren(QWidget):
+                w.setMouseTracking(True)
+                w.installEventFilter(self)
 
     def set_player(self, player: PlayerController):
         self.player = player
@@ -156,12 +177,20 @@ class MPVVideoWidget(QWidget):
     def hideEvent(self, event):
         super().hideEvent(event)
         self.controls.hide()
+        if hasattr(self, "next_ep_overlay") and self.next_ep_overlay:
+            self.next_ep_overlay.reset()
+        if hasattr(self, "skip_intro_overlay") and self.skip_intro_overlay:
+            self.skip_intro_overlay.hide()
         self.osd_timer.stop()
 
     def closeEvent(self, event):
         if hasattr(self, "controls") and self.controls:
             self.controls.hide_bars()
             self.controls.hide()
+        if hasattr(self, "next_ep_overlay") and self.next_ep_overlay:
+            self.next_ep_overlay.reset()
+        if hasattr(self, "skip_intro_overlay") and self.skip_intro_overlay:
+            self.skip_intro_overlay.hide()
         if hasattr(self, "osd_timer"):
             self.osd_timer.stop()
         if hasattr(self, "video_surface") and self.video_surface:
@@ -184,6 +213,13 @@ class MPVVideoWidget(QWidget):
             p = p.parentWidget()
         return None
 
+    def _raise_overlays(self):
+        """Garantit que les overlays interactifs restent toujours au-dessus des barres et contrôles OSD."""
+        if hasattr(self, "next_ep_overlay") and self.next_ep_overlay and self.next_ep_overlay.isVisible():
+            self.next_ep_overlay.raise_()
+        if hasattr(self, "skip_intro_overlay") and self.skip_intro_overlay and self.skip_intro_overlay.isVisible():
+            self.skip_intro_overlay.raise_()
+
     def _sync_geometry(self):
         """Positionne l'OSD (widget enfant) sur toute la zone vidéo.
 
@@ -201,18 +237,50 @@ class MPVVideoWidget(QWidget):
         else:
             self.controls.hide()
 
+        # Marge inférieure pour dégager complètement les boutons au-dessus de la barre OSD
+        bottom_margin = 135
+        if hasattr(self, "controls") and self.controls and hasattr(self.controls, "bottom_bar") and self.controls.bottom_bar.isVisible():
+            bb_h = self.controls.bottom_bar.height()
+            if bb_h > 40:
+                bottom_margin = max(bottom_margin, bb_h + 30)
+
+        if hasattr(self, "next_ep_overlay") and self.next_ep_overlay:
+            overlay_w = self.next_ep_overlay.width()
+            overlay_h = self.next_ep_overlay.sizeHint().height() or 140
+            ox = max(10, self.width() - overlay_w - 24)
+            oy = max(10, self.height() - overlay_h - bottom_margin)
+            self.next_ep_overlay.setGeometry(ox, oy, overlay_w, overlay_h)
+
+        if hasattr(self, "skip_intro_overlay") and self.skip_intro_overlay:
+            self.skip_intro_overlay.adjustSize()
+            s_width = max(180, self.skip_intro_overlay.sizeHint().width() or 180)
+            s_height = max(44, self.skip_intro_overlay.sizeHint().height() or 44)
+            sx = max(10, self.width() - s_width - 24)
+            sy = max(10, self.height() - s_height - bottom_margin)
+            self.skip_intro_overlay.setGeometry(sx, sy, s_width, s_height)
+
+        self._raise_overlays()
+
     def _is_click_on_controls_bar(self, global_pos: QPoint) -> bool:
         """Vérifie si la position globale se trouve sur l'une des barres interactives de l'OSD."""
         return self._is_mouse_on_controls_bar(global_pos)
 
     def _is_mouse_on_controls_bar(self, global_pos: Optional[QPoint] = None) -> bool:
-        """Vérifie si le curseur de la souris se trouve actuellement au-dessus d'une barre de l'OSD."""
+        """Vérifie si le curseur de la souris se trouve actuellement au-dessus d'une barre de l'OSD ou de l'overlay."""
+        if global_pos is None:
+            global_pos = QCursor.pos()
+        if hasattr(self, "next_ep_overlay") and self.next_ep_overlay and self.next_ep_overlay.isVisible():
+            ov_rect = QRect(self.next_ep_overlay.mapToGlobal(QPoint(0, 0)), self.next_ep_overlay.size())
+            if ov_rect.contains(global_pos):
+                return True
+        if hasattr(self, "skip_intro_overlay") and self.skip_intro_overlay and self.skip_intro_overlay.isVisible():
+            s_rect = QRect(self.skip_intro_overlay.mapToGlobal(QPoint(0, 0)), self.skip_intro_overlay.size())
+            if s_rect.contains(global_pos):
+                return True
         if not hasattr(self, "controls") or not self.controls or not self.controls.isVisible():
             return False
         if hasattr(self.controls, "is_mouse_on_bars"):
             return self.controls.is_mouse_on_bars(global_pos)
-        if global_pos is None:
-            global_pos = QCursor.pos()
         if hasattr(self.controls, "bottom_bar") and self.controls.bottom_bar.isVisible():
             bot_rect = QRect(self.controls.bottom_bar.mapToGlobal(QPoint(0, 0)), self.controls.bottom_bar.size())
             if bot_rect.contains(global_pos):
@@ -223,8 +291,23 @@ class MPVVideoWidget(QWidget):
                 return True
         return False
 
+    def suppress_clicks(self, duration: float = 1.2):
+        """Verrouille immédiatement tout clic ou rebond pendant la durée spécifiée."""
+        now = time.monotonic()
+        self._suppress_click_until = max(getattr(self, "_suppress_click_until", 0.0), now + duration)
+        self._last_dblclick_time = max(getattr(self, "_last_dblclick_time", 0.0), now)
+        self._ignore_next_release = True
+        self._mouse_pressed_on_video = False
+        if hasattr(self, "_click_timer"):
+            self._click_timer.stop()
+
     def _handle_single_click(self):
         """Action exécutée uniquement lorsqu'un vrai simple clic est confirmé (pas de double clic)."""
+        now = time.monotonic()
+        if now < getattr(self, "_suppress_click_until", 0.0):
+            return
+        if now - getattr(self, "_last_dblclick_time", 0.0) < 1.2:
+            return
         if self.controls.has_active_media:
             self._trigger_play_pause()
 
@@ -260,6 +343,18 @@ class MPVVideoWidget(QWidget):
 
     def eventFilter(self, watched, event: QEvent) -> bool:
         event_type = event.type()
+        # Si l'événement vise directement l'un des overlays (skip intro ou next episode) ou leurs enfants
+        if (
+            (hasattr(self, "skip_intro_overlay") and self.skip_intro_overlay and (watched == self.skip_intro_overlay or self.skip_intro_overlay.isAncestorOf(watched)))
+            or (hasattr(self, "next_ep_overlay") and self.next_ep_overlay and (watched == self.next_ep_overlay or self.next_ep_overlay.isAncestorOf(watched)))
+        ):
+            if event_type in (QEvent.Type.MouseMove, QEvent.Type.HoverMove, QEvent.Type.Enter):
+                self.osd_timer.stop()
+                self._was_mouse_on_controls = True
+                self.show_mouse_cursor()
+            # Laisser Qt distribuer les clics, pressions et survols naturellement aux boutons sans aucune interception !
+            return False
+
         if event_type in (QEvent.Type.MouseMove, QEvent.Type.HoverMove):
             if isinstance(event, QMouseEvent):
                 global_pos = event.globalPosition().toPoint()
@@ -278,7 +373,7 @@ class MPVVideoWidget(QWidget):
                     # Transition : la souris vient de sortir de la zone de la barre de contrôle
                     self._was_mouse_on_controls = False
                     self._last_mouse_pos = global_pos
-                    if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False) and not getattr(self.controls, "is_buffering", False):
+                    if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
                         self.osd_timer.start()
                 else:
                     if self._last_mouse_pos is not None:
@@ -289,25 +384,42 @@ class MPVVideoWidget(QWidget):
                         self._show_osd()
 
         elif event_type == QEvent.Type.Leave:
+            self.show_mouse_cursor()
             if getattr(self, "_was_mouse_on_controls", False) and not self._is_mouse_on_controls_bar():
                 self._was_mouse_on_controls = False
-                if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False) and not getattr(self.controls, "is_buffering", False):
+                if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
                     self.osd_timer.start()
 
         elif event_type == QEvent.Type.Enter:
+            self.show_mouse_cursor()
             if self._is_mouse_on_controls_bar():
                 self.osd_timer.stop()
                 self._was_mouse_on_controls = True
-                self.show_mouse_cursor()
+
+        elif event_type == QEvent.Type.MouseButtonPress:
+            if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.LeftButton:
+                global_pos = event.globalPosition().toPoint()
+                self._last_mouse_pos = global_pos
+                if not self._is_click_on_controls_bar(global_pos) and self.controls.has_active_media:
+                    # Si un timer de simple clic était en attente, le stopper immédiatement :
+                    # cela signifie qu'un second clic ou une action rapide commence !
+                    self._click_timer.stop()
+                    now = time.monotonic()
+                    if now < getattr(self, "_suppress_click_until", 0.0) or (now - getattr(self, "_last_dblclick_time", 0.0) < 1.0):
+                        self._mouse_pressed_on_video = False
+                    else:
+                        self._mouse_pressed_on_video = True
+                    self.setFocus()
+                    win = self.window()
+                    if win and not win.isActiveWindow():
+                        win.activateWindow()
 
         elif event_type == QEvent.Type.MouseButtonDblClick:
             if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.LeftButton:
                 global_pos = event.globalPosition().toPoint()
                 self._last_mouse_pos = global_pos
                 if not self._is_click_on_controls_bar(global_pos) and self.controls.has_active_media:
-                    self._click_timer.stop()
-                    self._last_dblclick_time = time.monotonic()
-                    self._ignore_next_release = False
+                    self.suppress_clicks(1.2)
                     self.fullscreen_requested.emit()
                     return True
 
@@ -316,26 +428,24 @@ class MPVVideoWidget(QWidget):
                 global_pos = event.globalPosition().toPoint()
                 self._last_mouse_pos = global_pos
                 if not self._is_click_on_controls_bar(global_pos) and self.controls.has_active_media:
-                    # Si un double-clic vient de se produire (< 350ms), ignorer le release résiduel
-                    if time.monotonic() - getattr(self, "_last_dblclick_time", 0.0) < 0.35:
-                        return True
-                    if self._ignore_next_release:
+                    now = time.monotonic()
+                    # Si le release suivant un double-clic ou si un verrou est actif, ignorer le release
+                    if getattr(self, "_ignore_next_release", False):
                         self._ignore_next_release = False
+                        self._mouse_pressed_on_video = False
                         return True
+                    if now < getattr(self, "_suppress_click_until", 0.0) or (now - getattr(self, "_last_dblclick_time", 0.0) < 1.0):
+                        self._mouse_pressed_on_video = False
+                        return True
+                    if not getattr(self, "_mouse_pressed_on_video", False):
+                        return True
+                    self._mouse_pressed_on_video = False
                     self._click_timer.stop()
-                    # Intervalle réactif (220ms) pour une pause/reprise rapide sans latence
-                    self._click_timer.start(220)
+                    from PyQt6.QtWidgets import QApplication
+                    dbl_int = QApplication.doubleClickInterval()
+                    delay_ms = max(400, min(550, dbl_int + 20))
+                    self._click_timer.start(delay_ms)
                     return True
-
-        elif event_type == QEvent.Type.MouseButtonPress:
-            if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.LeftButton:
-                global_pos = event.globalPosition().toPoint()
-                self._last_mouse_pos = global_pos
-                if not self._is_click_on_controls_bar(global_pos) and self.controls.has_active_media:
-                    self.setFocus()
-                    win = self.window()
-                    if win and not win.isActiveWindow():
-                        win.activateWindow()
 
         elif event_type == QEvent.Type.Wheel:
             if isinstance(event, QWheelEvent) and self._handle_wheel_volume(event):
@@ -351,7 +461,7 @@ class MPVVideoWidget(QWidget):
         else:
             if getattr(self, "_was_mouse_on_controls", False):
                 self._was_mouse_on_controls = False
-                if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False) and not getattr(self.controls, "is_buffering", False):
+                if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
                     self.osd_timer.start()
             else:
                 if self._last_mouse_pos is not None:
@@ -402,15 +512,28 @@ class MPVVideoWidget(QWidget):
             self._sync_geometry()
             self.controls.show()
             self.controls.raise_()
-            self.show_mouse_cursor()
+            self._raise_overlays()
+            # Si les barres ne sont pas survolées, s'assurer qu'elles restent masquées :
+            # seul le cercle de chargement s'affiche au centre pour garder l'image propre !
+            if not self._is_mouse_on_controls_bar():
+                self.controls.hide_bars()
+                self.hide_mouse_cursor()
         elif state in ("playing", "paused"):
             self.stack.setCurrentIndex(1)
             self.video_surface.set_rendering_active(True)
             self.controls.set_playing_state(state)
-            if self.controls.isVisible():
+            if state == "playing":
+                # Le freeze est terminé ou la lecture se poursuit.
+                # Ne JAMAIS forcer l'affichage de l'OSD à la fin du freeze !
+                if not self.controls.are_bars_visible():
+                    self.controls.hide()
+                    self.hide_mouse_cursor()
+                else:
+                    if not self._is_mouse_on_controls_bar():
+                        self.osd_timer.start()
+            elif state == "paused":
+                # En pause : afficher l'OSD
                 self._show_osd()
-            elif state == "playing" and (self.window().isFullScreen() or getattr(self.controls, "is_fullscreen", False)):
-                self.hide_mouse_cursor()
         elif state == "error":
             self.stack.setCurrentIndex(1)
             self.video_surface.set_rendering_active(False)
@@ -465,19 +588,20 @@ class MPVVideoWidget(QWidget):
         self.controls.show()
         self.controls.show_bars()
         self.controls.raise_()
+        self._raise_overlays()
         self.show_mouse_cursor()
 
         if self._is_mouse_on_controls_bar():
             self.osd_timer.stop()
             self._was_mouse_on_controls = True
-        elif not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False) and not getattr(self.controls, "is_buffering", False):
+        elif not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
             self.osd_timer.start()
         else:
             self.osd_timer.stop()
 
     def _hide_osd(self):
         """Masque complètement l'OSD après timeout d'inactivité."""
-        if getattr(self.controls, "is_paused", False) or getattr(self.controls, "is_error", False) or getattr(self.controls, "is_buffering", False):
+        if getattr(self.controls, "is_paused", False) or getattr(self.controls, "is_error", False):
             return
 
         # Ne jamais masquer si la souris se trouve sur la barre de contrôle
@@ -486,7 +610,15 @@ class MPVVideoWidget(QWidget):
             self._was_mouse_on_controls = True
             return
 
-        if self.controls.has_active_media:
-            self.controls.hide()
+        # Masquer les barres d'OSD
+        self.controls.hide_bars()
+
+        # Si aucun buffering n'est en cours, masquer également le conteneur controls
+        if not getattr(self.controls, "is_buffering", False):
+            if self.controls.has_active_media:
+                self.controls.hide()
+
+        # Masquer le curseur au-dessus de la vidéo lorsque l'OSD disparaît
+        if self.controls.has_active_media and not getattr(self.controls, "is_paused", False):
             self.hide_mouse_cursor()
 

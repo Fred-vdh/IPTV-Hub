@@ -124,6 +124,7 @@ class MovieDetailsView(QWidget):
         self._backdrop_url: str = ""
         self._is_video_playing: bool = False
         self._trailer_worker: Optional[_TrailerLookupWorker] = None
+        self._tmdb_worker: Optional[_TMDBReviewsWorker] = None
 
         self.setObjectName("movieDetailsView")
         self.setStyleSheet("QWidget#movieDetailsView { background-color: #0d111a; }")
@@ -584,11 +585,12 @@ class MovieDetailsView(QWidget):
                 self.card_frame.update()
 
         if self.playlist and self.playlist.playlist_type == "xtream" and channel.stream_id:
+            ua = channel.user_agent or getattr(self.playlist, "user_agent", "") or getattr(self.db.get_settings(), "user_agent", "")
             client = XtreamClient(
                 self.playlist.server_url,
                 self.playlist.username,
                 self.playlist.password,
-                channel.user_agent or self.playlist.user_agent,
+                ua,
             )
             self._worker = _MovieInfoWorker(client, channel.stream_id, self)
             self._worker.finished.connect(self._on_extra_info_loaded)
@@ -1000,8 +1002,10 @@ class MovieDetailsView(QWidget):
 
     def _load_tmdb_reviews(self, tmdb_id: str):
         if self._tmdb_worker and self._tmdb_worker.isRunning():
-            self._tmdb_worker.terminate()
-            self._tmdb_worker.wait()
+            try:
+                self._tmdb_worker.finished_reviews.disconnect()
+            except Exception:
+                pass
 
         self._tmdb_worker = _TMDBReviewsWorker(tmdb_id, self)
         self._tmdb_worker.finished_reviews.connect(self._on_tmdb_reviews_loaded)
@@ -1209,26 +1213,23 @@ class MovieDetailsView(QWidget):
 
     def stop_active_workers(self):
         """Arrête tous les threads d'arrière-plan actifs pour libérer le processeur et le réseau."""
-        if hasattr(self, "_worker") and self._worker and self._worker.isRunning():
+        if hasattr(self, "_worker") and self._worker:
             try:
-                self._worker.terminate()
-                self._worker.wait()
+                self._worker.finished.disconnect()
             except Exception:
                 pass
             self._worker = None
 
-        if hasattr(self, "_trailer_worker") and self._trailer_worker and self._trailer_worker.isRunning():
+        if hasattr(self, "_trailer_worker") and self._trailer_worker:
             try:
-                self._trailer_worker.terminate()
-                self._trailer_worker.wait()
+                self._trailer_worker.finished_trailer.disconnect()
             except Exception:
                 pass
             self._trailer_worker = None
 
-        if hasattr(self, "_tmdb_worker") and self._tmdb_worker and self._tmdb_worker.isRunning():
+        if hasattr(self, "_tmdb_worker") and self._tmdb_worker:
             try:
-                self._tmdb_worker.terminate()
-                self._tmdb_worker.wait()
+                self._tmdb_worker.finished_reviews.disconnect()
             except Exception:
                 pass
             self._tmdb_worker = None

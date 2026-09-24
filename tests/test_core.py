@@ -300,7 +300,7 @@ class TestRecentlyAddedDates(unittest.TestCase):
         # Test date format
         self.assertEqual(format_recent_date(None), "")
         self.assertEqual(format_recent_date(""), "")
-        self.assertIn("sept.", format_recent_date("2026-09-05T08:00:00"))
+        self.assertIn("sept.", format_recent_date("2026-09-05T08:00:00").lower())
         self.assertIn("2024", format_recent_date("2024-01-10T12:00:00"))
 
 

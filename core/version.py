@@ -7,9 +7,9 @@ import re
 import sys
 from pathlib import Path
 
-__version__ = "2.1.6"
+__version__ = "2.2.2"
 APP_NAME = "IPTV Hub"
-BUILD_DATE = "2026-09-16"
+BUILD_DATE = "2026-09-25"
 
 
 def bump_version(part: str = "patch") -> str:

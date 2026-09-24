@@ -1511,7 +1511,7 @@ class SeriesDetailsView(QWidget):
             if (ep_id and f"/{ep_id}." in key) or (ep_url and key == ep_url) or (ep_id and key.endswith(f"/{ep_id}")):
                 if dur > 0:
                     ratio = min(1.0, max(0.0, pos / dur))
-                    is_w = bool(ratio >= 0.90 or (dur - pos) <= 60)
+                    is_w = bool(ratio >= 0.90 or (dur >= 180 and pos >= 120 and (dur - pos) <= 60))
                     return (1.0 if is_w else ratio, is_w)
                 return (0.0, False)
 
@@ -1832,7 +1832,7 @@ class SeriesDetailsView(QWidget):
         ch_id = self.channel.id or (int(ep_id) if ep_id.isdigit() else 0)
         if is_already_watched:
             # Réinitialiser : supprimer uniquement la progression de cet épisode spécifique
-            self.db.clear_playback_progress(stream_url=stream_url)
+            self.db.clear_playback_progress(stream_url=stream_url, episode_id=ep_id)
             self._marked_watched_episodes.discard(str(ep_id))
         else:
             # Valider : forcer le statut terminé à 100%

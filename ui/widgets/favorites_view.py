@@ -3,6 +3,7 @@ Vue dédiée aux Favoris avec affiches cinéma modernes, filtres interactifs (Fi
 suppression rapide en un clic (bouton ×) et horodatage en français.
 """
 
+import re
 from datetime import datetime
 from typing import Optional, List
 from PyQt6.QtWidgets import (
@@ -590,6 +591,18 @@ class FavoritesView(QWidget):
             search_query=self.search_query if self.search_query else None,
             order_by="favorite_date_desc"
         )
+
+        # Déduplication par nom nettoyé + stream_type + playlist_id
+        unique_channels = []
+        seen_fav_keys = set()
+        for ch in channels:
+            clean_n = re.sub(r"\s+", " ", (ch.name or "").lower().strip())
+            key = (clean_n, ch.stream_type, ch.playlist_id)
+            if key in seen_fav_keys:
+                continue
+            seen_fav_keys.add(key)
+            unique_channels.append(ch)
+        channels = unique_channels
 
         if not channels:
             self.empty_label.setVisible(True)

@@ -2,8 +2,9 @@
 Contrôleur de lecture vidéo basé sur libmpv et intégré avec les signaux PyQt6.
 """
 
+import re
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple, Set, List
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 from core.mpv_setup import setup_mpv_environment
@@ -11,6 +12,109 @@ from core.mpv_setup import setup_mpv_environment
 # Initialisation du dossier des DLLs pour libmpv
 setup_mpv_environment()
 import mpv  # noqa: E402
+
+
+LANGUAGE_GROUPS: Dict[str, Tuple[List[str], Set[str]]] = {
+    "fra": (
+        ["fre", "fra", "fr"],
+        {"fra", "fre", "fr", "french", "français", "francais", "vf", "vff", "vfq", "truefrench", "subforced"}
+    ),
+    "eng": (
+        ["eng", "en"],
+        {"eng", "en", "english", "anglais", "vo", "vost", "vostfr"}
+    ),
+    "spa": (
+        ["spa", "es"],
+        {"spa", "es", "spanish", "espagnol", "espanol", "castellano"}
+    ),
+    "ger": (
+        ["ger", "deu", "de"],
+        {"ger", "deu", "de", "german", "allemand", "deutsch"}
+    ),
+    "ita": (
+        ["ita", "it"],
+        {"ita", "it", "italian", "italien", "italiano"}
+    ),
+    "por": (
+        ["por", "pt"],
+        {"por", "pt", "portuguese", "portugais", "portugues"}
+    ),
+    "ara": (
+        ["ara", "ar"],
+        {"ara", "ar", "arabic", "arabe"}
+    ),
+}
+
+FORCED_SUBTITLE_PATTERNS: List[str] = [
+    r"\bforced\b",
+    r"\bforce\b",
+    r"\bforcé\b",
+    r"\bforcée\b",
+    r"\bforcés\b",
+    r"\bforces\b",
+    r"subforced",
+    r"sub[-_]?force",
+]
+
+
+def is_track_forced(track: Optional[Dict[str, Any]]) -> bool:
+    """Détecte si une piste de sous-titres est de type 'forcé'."""
+    if not track or not isinstance(track, dict):
+        return False
+    if track.get("forced") is True:
+        return True
+    title = str(track.get("title") or "").lower()
+    lang = str(track.get("lang") or "").lower()
+    combined = f"{title} {lang}"
+    for pat in FORCED_SUBTITLE_PATTERNS:
+        if re.search(pat, combined):
+            return True
+    return False
+
+
+def get_track_lang_family(track: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Identifie la famille linguistique canonique d'une piste ('fra', 'eng', etc.)."""
+    if not track or not isinstance(track, dict):
+        return None
+    lang = str(track.get("lang") or "").lower().strip()
+    title = str(track.get("title") or "").lower().strip()
+
+    # 1. Correspondance directe sur le code de langue
+    for family, (iso_list, kw_set) in LANGUAGE_GROUPS.items():
+        if lang in kw_set or any(lang.startswith(iso) for iso in iso_list):
+            return family
+
+    # 2. Recherche par mots-clés dans le titre
+    for family, (iso_list, kw_set) in LANGUAGE_GROUPS.items():
+        for kw in kw_set:
+            if len(kw) <= 2:
+                if re.search(rf"\b{re.escape(kw)}\b", title):
+                    return family
+            else:
+                if kw in title:
+                    return family
+
+    return lang if lang else None
+
+
+def parse_subtitle_preference(pref: str) -> Tuple[str, bool]:
+    """Extrait le code de langue de base et le statut 'forcé' d'une préférence de sous-titre."""
+    pref = str(pref or "").strip()
+    if not pref or pref == "off":
+        return ("off", False)
+    is_forced = False
+    if ":forced" in pref:
+        base = pref.replace(":forced", "").strip()
+        is_forced = True
+    elif "forced" in pref.lower():
+        is_forced = True
+        base = re.sub(r"(?i)[-_:]?subforced|[-_:]?forced", "", pref).strip()
+        if not base:
+            base = "fra"
+    else:
+        base = pref
+    return (base, is_forced)
+
 
 
 class PlayerController(QObject):
@@ -27,6 +131,13 @@ class PlayerController(QObject):
     audio_preference_changed = pyqtSignal(str)      # 'fra', 'eng', etc.
     subtitle_preference_changed = pyqtSignal(str, bool)  # 'fra', True/False
 
+    _is_stopping: bool = False
+    _stream_has_started: bool = False
+    _eof_reported: bool = False
+    _is_vod: bool = False
+    _current_url: str = ""
+    _player: Any = None
+
     def __init__(
         self,
         wid: Optional[int] = None,
@@ -35,6 +146,7 @@ class PlayerController(QObject):
         preferred_subtitle_lang: str = "off",
         subtitles_enabled: bool = False,
         render_mode: bool = False,
+        initial_hwdec: str = "auto",
         parent: Optional[QObject] = None
     ):
         super().__init__(parent)
@@ -42,10 +154,13 @@ class PlayerController(QObject):
         # En mode "render API" (OpenGL), libmpv ne dessine pas dans une fenêtre
         # native : c'est le widget OpenGL qui rend les frames via mpv_render_context.
         self._render_mode = render_mode
+        self._hwdec_mode = initial_hwdec or "auto"
         self._initial_volume = initial_volume
         self._preferred_audio_lang = preferred_audio_lang
         self._preferred_subtitle_lang = preferred_subtitle_lang
         self._subtitles_enabled = subtitles_enabled and (preferred_subtitle_lang != "off")
+        base_sub, is_forced = parse_subtitle_preference(preferred_subtitle_lang)
+        self._preferred_subtitle_forced = is_forced
         self._is_muted = False
         self._current_url = ""
         self._is_vod = False
@@ -55,6 +170,7 @@ class PlayerController(QObject):
         # Empêche d'émettre plusieurs fois playback_finished pour un même média
         # (la propriété eof-reached peut être notifiée plusieurs fois).
         self._eof_reported = False
+        self._is_stopping = False
 
         self._last_progress_monotonic: float = 0.0
         self._stall_start_monotonic: Optional[float] = None
@@ -70,6 +186,56 @@ class PlayerController(QObject):
         self._stall_monitor.timeout.connect(self._on_stall_monitor_tick)
 
         self._init_mpv()
+
+    def _get_player_prop(self, key: str, default: Any = None) -> Any:
+        """Récupère une propriété MPV de façon sécurisée (compatible MPV réel et Mock de test)."""
+        if not self._player:
+            return default
+        try:
+            if hasattr(self._player, "get_property"):
+                val = self._player.get_property(key)
+                return val if val is not None else default
+            if isinstance(self._player, dict):
+                return self._player.get(key, default)
+            return getattr(self._player, key, default)
+        except Exception:
+            return default
+
+    def _get_synchronized_track_list(self, raw_tracks: Optional[list] = None) -> list:
+        """Retourne la liste des pistes avec l'attribut 'selected' synchronisé sur l'état effectif de MPV."""
+        if raw_tracks is None and self._player:
+            try:
+                if hasattr(self._player, "get_property"):
+                    raw_tracks = self._player.get_property("track-list") or []
+                elif isinstance(self._player, dict):
+                    raw_tracks = self._player.get("track-list") or []
+            except Exception:
+                raw_tracks = []
+        if not raw_tracks:
+            return []
+
+        curr_sid = self._get_player_prop("sid")
+        curr_aid = self._get_player_prop("aid")
+
+        synced = []
+        for t in raw_tracks:
+            if not isinstance(t, dict):
+                continue
+            t_copy = dict(t)
+            t_type = t_copy.get("type")
+            t_id = t_copy.get("id")
+
+            if t_type == "sub":
+                if not self._subtitles_enabled or self._preferred_subtitle_lang == "off" or curr_sid in (None, False, "no", 0, "0"):
+                    t_copy["selected"] = False
+                else:
+                    t_copy["selected"] = (curr_sid == t_id or str(curr_sid) == str(t_id))
+            elif t_type == "audio":
+                if curr_aid not in (None, False, "no", 0, "0"):
+                    t_copy["selected"] = (curr_aid == t_id or str(curr_aid) == str(t_id))
+
+            synced.append(t_copy)
+        return synced
 
     @property
     def mpv_handle(self) -> Optional[int]:
@@ -105,22 +271,44 @@ class PlayerController(QObject):
     def _init_mpv(self):
         """Instancie et configure libmpv avec des options optimisées pour l'IPTV."""
         try:
+            # En rendu OpenGL (mpv_render_context), 'auto' peut tenter d'utiliser un interop
+            # direct DirectX-OpenGL fragile sur certains pilotes (perte de trames de référence).
+            # 'auto-safe' garantit un transfert mémoire vidéo sécurisé (d3d11va-copy / nvdec-copy).
+            hwdec_val = self._hwdec_mode or "no"
+            if self._render_mode and hwdec_val.lower() == "auto":
+                hwdec_val = "no"
+
+            pref_sub_base, _ = parse_subtitle_preference(self._preferred_subtitle_lang)
+            family_sub = get_track_lang_family({"lang": pref_sub_base, "title": pref_sub_base}) or pref_sub_base
+            if family_sub in LANGUAGE_GROUPS:
+                slang_init = ",".join(LANGUAGE_GROUPS[family_sub][0])
+            else:
+                slang_init = family_sub or "fre,fra,fr"
+
+            family_aud = get_track_lang_family({"lang": self._preferred_audio_lang, "title": self._preferred_audio_lang}) or self._preferred_audio_lang
+            if family_aud in LANGUAGE_GROUPS:
+                alang_init = ",".join(LANGUAGE_GROUPS[family_aud][0])
+            else:
+                alang_init = self._preferred_audio_lang or "fre,fra,fr"
+
             mpv_kwargs: Dict[str, Any] = {
                 "input_default_bindings": False,
                 "input_vo_keyboard": False,
                 "osc": False,                     # Désactive l'OSD interne de MPV au profit de nos contrôles Qt
                 "keep_open": "yes",
                 "idle": "yes",
-                "hwdec": "auto-safe",             # auto-safe garantit un décodage matériel fiable et stable avec OpenGL
+                "hwdec": hwdec_val,               # auto-safe garantit un décodage matériel fiable et stable avec OpenGL
+                "hr_seek": "yes",                 # Recherche haute précision : recalcule toujours les I-frames (pas de bandes noires)
+                "hr_seek_framedrop": "no",        # Évite absolument la corruption de macroblocs / carrés noirs pendant les sauts
                 "keepaspect": "yes",
                 "autofit": "100%x100%",
                 "video-unscaled": "no",
                 "video-align-x": 0,
                 "video-align-y": 0,
                 "volume": max(0, min(100, self._initial_volume)),
-                "alang": self._preferred_audio_lang or "fre,fra,fr",
+                "alang": alang_init,
                 "sid": "auto" if (self._subtitles_enabled and self._preferred_subtitle_lang != "off") else "no",
-                "slang": self._preferred_subtitle_lang if (self._subtitles_enabled and self._preferred_subtitle_lang != "off") else "no",
+                "slang": slang_init if (self._subtitles_enabled and self._preferred_subtitle_lang != "off") else "no",
                 "demuxer_max_bytes": 64 * 1024 * 1024,   # 64MB buffer pour VOD HD/4K fluide
                 "demuxer_max_back_bytes": 16 * 1024 * 1024,
                 "demuxer_readahead_secs": 20,
@@ -159,6 +347,8 @@ class PlayerController(QObject):
             self._player.observe_property("volume", self._on_volume_changed)
             self._player.observe_property("mute", self._on_mute_changed)
             self._player.observe_property("track-list", self._on_track_list)
+            self._player.observe_property("sid", self._on_sid_changed)
+            self._player.observe_property("aid", self._on_aid_changed)
             self._player.observe_property("paused-for-cache", self._on_paused_for_cache)
 
         except Exception as e:
@@ -312,10 +502,23 @@ class PlayerController(QObject):
         if not value:
             self._eof_reported = False
             return
-        if not self._is_vod or not self._current_url:
+        if not self._is_vod or not self._current_url or self.__dict__.get("_is_stopping", False):
+            return
+        if not self._stream_has_started:
             return
         if self._eof_reported:
             return
+
+        # Protection anti-faux-EOF : vérifier qu'on était bien en fin de média
+        # Si on est à moins de 85% de la vidéo, ce n'est PAS un EOF naturel (ex: arrêt utilisateur ou coupure)
+        try:
+            pos = float(self._player.time_pos or 0.0) if self._player else 0.0
+            dur = float(self._player.duration or 0.0) if self._player else 0.0
+            if dur > 60 and pos < (dur * 0.85) and (dur - pos) > 60:
+                return
+        except Exception:
+            pass
+
         self._eof_reported = True
         self.playback_finished.emit()
 
@@ -328,6 +531,14 @@ class PlayerController(QObject):
             self._is_muted = bool(value)
             self.mute_changed.emit(self._is_muted)
 
+    def _on_sid_changed(self, name, value):
+        if self._player and not getattr(self, "_is_stopping", False):
+            self.tracks_changed.emit(self._get_synchronized_track_list())
+
+    def _on_aid_changed(self, name, value):
+        if self._player and not getattr(self, "_is_stopping", False):
+            self.tracks_changed.emit(self._get_synchronized_track_list())
+
     def _on_track_list(self, name, value):
         if value is not None and isinstance(value, list):
             has_tracks = any(t.get("type") in ("video", "audio") for t in value if isinstance(t, dict))
@@ -338,7 +549,8 @@ class PlayerController(QObject):
                 self._set_state("playing")
             self._auto_select_preferred_audio(value)
             self._auto_select_preferred_subtitles(value)
-            self.tracks_changed.emit(value)
+            synced_tracks = self._get_synchronized_track_list(value)
+            self.tracks_changed.emit(synced_tracks)
 
     def _auto_select_preferred_audio(self, tracks: list):
         """Sélectionne intelligemment la piste audio correspondant à la langue préférée."""
@@ -349,42 +561,33 @@ class PlayerController(QObject):
         if len(audio_tracks) <= 1:
             return
 
-        # Construction des mots-clés de recherche
         raw_tokens = [tok.strip().lower() for tok in self._preferred_audio_lang.split(",") if tok.strip()]
         if not raw_tokens:
             return
 
-        # Expansion des équivalences linguistiques
         expanded_keywords = set(raw_tokens)
-        french_keys = {"fra", "fre", "fr", "french", "français", "francais", "vf", "vff", "vfq", "truefrench"}
-        english_keys = {"eng", "en", "english", "anglais", "vo", "vost", "vostfr"}
-        spanish_keys = {"spa", "es", "spanish", "espagnol", "espanol", "castellano"}
-        german_keys = {"ger", "deu", "de", "german", "allemand", "deutsch"}
-        italian_keys = {"ita", "it", "italian", "italien", "italiano"}
-        portuguese_keys = {"por", "pt", "portuguese", "portugais", "portugues"}
-        arabic_keys = {"ara", "ar", "arabic", "arabe"}
+        for family, (iso_list, kw_set) in LANGUAGE_GROUPS.items():
+            if any(k in expanded_keywords for k in kw_set) or any(k in expanded_keywords for k in iso_list):
+                expanded_keywords.update(kw_set)
 
-        for group in (french_keys, english_keys, spanish_keys, german_keys, italian_keys, portuguese_keys, arabic_keys):
-            if any(k in expanded_keywords for k in group):
-                expanded_keywords.update(group)
-
-        # Recherche de la meilleure piste
         best_track = None
         best_score = 0
-        import re
 
         for t in audio_tracks:
             score = 0
-            t_lang = (t.get("lang") or "").lower().strip()
-            t_title = (t.get("title") or "").lower().strip()
+            t_lang = str(t.get("lang") or "").lower().strip()
+            t_title = str(t.get("title") or "").lower().strip()
+            t_family = get_track_lang_family(t)
 
-            # 1. Correspondance sur le code ISO / langue (priorité absolue)
-            if t_lang in expanded_keywords:
+            # 1. Famille linguistique et code ISO
+            if t_family and any(k in expanded_keywords for k in LANGUAGE_GROUPS.get(t_family, ([], set()))[1]):
+                score += 12
+            elif t_lang in expanded_keywords:
                 score += 10
             elif any(t_lang.startswith(k) for k in expanded_keywords if len(k) >= 2):
                 score += 8
 
-            # 2. Correspondance dans le titre de la piste (ex: "French AC3", "VFF", etc.)
+            # 2. Titre de la piste
             for kw in expanded_keywords:
                 if len(kw) <= 2:
                     if re.search(rf"\b{re.escape(kw)}\b", t_title):
@@ -397,94 +600,134 @@ class PlayerController(QObject):
                 best_score = score
                 best_track = t
 
-        if best_track and best_score > 0 and not best_track.get("selected"):
+        if best_track and best_score > 0:
+            target_id = best_track.get("id")
             try:
-                target_id = best_track.get("id")
-                current_aid = self._player.get_property("aid")
+                current_aid = self._get_player_prop("aid")
                 if current_aid != target_id:
                     self._player["aid"] = target_id
             except Exception as e:
                 print(f"[PlayerController] Auto audio select error: {e}")
+            for t in tracks:
+                if t.get("type") == "audio":
+                    t["selected"] = (t.get("id") == target_id)
 
     def _auto_select_preferred_subtitles(self, tracks: list):
-        """Applique la préférence utilisateur pour les sous-titres de manière stricte et persistante."""
+        """Applique la préférence utilisateur pour les sous-titres avec prise en charge complète du statut forcé."""
         if not self._player:
             return
 
         # Cas 1 : Sous-titres désactivés par l'utilisateur -> forcer la désactivation
         if not self._subtitles_enabled or self._preferred_subtitle_lang == "off":
             try:
-                curr_sid = self._player.get_property("sid")
+                curr_sid = self._get_player_prop("sid")
                 if curr_sid and curr_sid != "no":
                     self._player["sid"] = "no"
             except Exception:
                 pass
+            for t in tracks:
+                if t.get("type") == "sub":
+                    t["selected"] = False
             return
 
-        # Cas 2 : Sous-titres activés par l'utilisateur
+        # Cas 2 : Sous-titres activés
         sub_tracks = [t for t in tracks if t.get("type") == "sub"]
         if not sub_tracks:
             return
 
-        pref_lang = (self._preferred_subtitle_lang or "auto").strip().lower()
-        if pref_lang == "auto":
+        pref_base, want_forced = parse_subtitle_preference(self._preferred_subtitle_lang)
+        if pref_base == "auto":
             try:
-                curr_sid = self._player.get_property("sid")
+                curr_sid = self._get_player_prop("sid")
                 if not curr_sid or curr_sid == "no":
                     self._player["sid"] = sub_tracks[0].get("id", 1)
             except Exception:
                 pass
             return
 
-        raw_tokens = [tok.strip().lower() for tok in pref_lang.split(",") if tok.strip()]
-        expanded_keywords = set(raw_tokens)
-        french_keys = {"fra", "fre", "fr", "french", "français", "francais", "vf", "vff", "vfq", "truefrench"}
-        english_keys = {"eng", "en", "english", "anglais", "vo", "vost", "vostfr"}
-        spanish_keys = {"spa", "es", "spanish", "espagnol", "espanol", "castellano"}
-        german_keys = {"ger", "deu", "de", "german", "allemand", "deutsch"}
-        italian_keys = {"ita", "it", "italian", "italien", "italiano"}
-        portuguese_keys = {"por", "pt", "portuguese", "portugais", "portugues"}
-        arabic_keys = {"ara", "ar", "arabic", "arabe"}
+        target_family = get_track_lang_family({"lang": pref_base, "title": pref_base}) or pref_base.lower()
 
-        for group in (french_keys, english_keys, spanish_keys, german_keys, italian_keys, portuguese_keys, arabic_keys):
-            if any(k in expanded_keywords for k in group):
-                expanded_keywords.update(group)
+        expanded_keywords = set()
+        if target_family in LANGUAGE_GROUPS:
+            expanded_keywords.update(LANGUAGE_GROUPS[target_family][1])
+        else:
+            raw_tokens = [tok.strip().lower() for tok in pref_base.split(",") if tok.strip()]
+            expanded_keywords.update(raw_tokens)
+            for fam, (iso_list, kw_set) in LANGUAGE_GROUPS.items():
+                if any(k in expanded_keywords for k in kw_set) or any(k in expanded_keywords for k in iso_list):
+                    expanded_keywords.update(kw_set)
 
-        import re
         best_track = None
-        best_score = 0
+        best_score = -1
 
         for t in sub_tracks:
             score = 0
-            t_lang = (t.get("lang") or "").lower().strip()
-            t_title = (t.get("title") or "").lower().strip()
+            t_family = get_track_lang_family(t)
+            t_forced = is_track_forced(t)
+            t_lang = str(t.get("lang") or "").lower().strip()
+            t_title = str(t.get("title") or "").lower().strip()
 
-            if t_lang in expanded_keywords:
-                score += 10
+            is_same_lang = False
+            if t_family and t_family == target_family:
+                is_same_lang = True
+            elif t_lang in expanded_keywords:
+                is_same_lang = True
             elif any(t_lang.startswith(k) for k in expanded_keywords if len(k) >= 2):
-                score += 8
+                is_same_lang = True
+            else:
+                for kw in expanded_keywords:
+                    if len(kw) <= 2:
+                        if re.search(rf"\b{re.escape(kw)}\b", t_title):
+                            is_same_lang = True
+                            break
+                    else:
+                        if kw in t_title:
+                            is_same_lang = True
+                            break
 
-            for kw in expanded_keywords:
-                if len(kw) <= 2:
-                    if re.search(rf"\b{re.escape(kw)}\b", t_title):
-                        score += 7
+            if is_same_lang:
+                if want_forced:
+                    if t_forced:
+                        score = 100  # Parfaite adéquation : langue cible + forcé
+                    else:
+                        score = 40   # Fallback langue cible complète
                 else:
-                    if kw in t_title:
-                        score += 7
+                    if not t_forced:
+                        score = 100  # Parfaite adéquation : langue cible + complet
+                    else:
+                        score = 25   # Fallback langue cible forcée
+            else:
+                if want_forced and t_forced:
+                    score = 5
+                else:
+                    score = 0
 
             if score > best_score:
                 best_score = score
                 best_track = t
 
-        target_track = best_track or sub_tracks[0]
+        target_track = best_track if (best_track and best_score > 0) else None
         if target_track:
+            target_id = target_track.get("id")
             try:
-                target_id = target_track.get("id")
-                curr_sid = self._player.get_property("sid")
+                curr_sid = self._get_player_prop("sid")
                 if curr_sid != target_id:
                     self._player["sid"] = target_id
             except Exception:
                 pass
+            for t in tracks:
+                if t.get("type") == "sub":
+                    t["selected"] = (t.get("id") == target_id)
+        else:
+            try:
+                curr_sid = self._get_player_prop("sid")
+                if curr_sid and curr_sid != "no":
+                    self._player["sid"] = "no"
+            except Exception:
+                pass
+            for t in tracks:
+                if t.get("type") == "sub":
+                    t["selected"] = False
 
     # ------------------ CONTRÔLES PUBLICS ------------------
 
@@ -505,9 +748,16 @@ class PlayerController(QObject):
         if not self._player or not url:
             return
 
+        if self._current_url and self._player:
+            try:
+                self._player.command("stop")
+            except Exception:
+                pass
+
         self._current_url = url
         self._stream_has_started = False
         self._eof_reported = False
+        self._is_vod = False
         self._is_user_paused = False
         self._last_progress_monotonic = time.monotonic()
         self._stall_start_monotonic = None
@@ -553,6 +803,18 @@ class PlayerController(QObject):
                     self._player["sid"] = "no"
                 except Exception:
                     pass
+            else:
+                pref_base, want_forced = parse_subtitle_preference(self._preferred_subtitle_lang)
+                family = get_track_lang_family({"lang": pref_base, "title": pref_base}) or pref_base
+                if family in LANGUAGE_GROUPS:
+                    slang_val = ",".join(LANGUAGE_GROUPS[family][0])
+                else:
+                    slang_val = family or "fre,fra,fr"
+                try:
+                    self._player["slang"] = slang_val
+                    self._player["sid"] = "auto"
+                except Exception:
+                    pass
 
         except Exception as e:
             if self._stream_watchdog.isActive():
@@ -583,12 +845,14 @@ class PlayerController(QObject):
                 self.pause()
 
     def stop(self):
+        self._is_stopping = True
         if self._stream_watchdog.isActive():
             self._stream_watchdog.stop()
         if self._stall_monitor.isActive():
             self._stall_monitor.stop()
         self._stream_has_started = False
-        self._eof_reported = False
+        self._eof_reported = True
+        self._is_vod = False
         self._stall_start_monotonic = None
         self._is_user_paused = False
         if self._player:
@@ -602,6 +866,7 @@ class PlayerController(QObject):
                 self.duration_changed.emit(0.0)
             except Exception:
                 pass
+        self._is_stopping = False
 
     def seek(self, seconds: float, relative: bool = False):
         self._eof_reported = False
@@ -644,15 +909,26 @@ class PlayerController(QObject):
         if self._player:
             try:
                 self._player["aid"] = track_id
-                tracks = self._player["track-list"] or []
+                tracks = self._get_player_prop("track-list") or []
+                chosen_track = None
                 for t in tracks:
                     if t.get("type") == "audio" and t.get("id") == track_id:
-                        lang = t.get("lang") or t.get("title") or ""
-                        if lang:
-                            self._preferred_audio_lang = lang
-                            self._player["alang"] = lang
-                            self.audio_preference_changed.emit(lang)
+                        chosen_track = t
                         break
+                if chosen_track:
+                    family = get_track_lang_family(chosen_track) or chosen_track.get("lang") or chosen_track.get("title") or ""
+                    if family:
+                        if family in LANGUAGE_GROUPS:
+                            alang_val = ",".join(LANGUAGE_GROUPS[family][0])
+                        else:
+                            alang_val = family
+                        self._preferred_audio_lang = alang_val
+                        try:
+                            self._player["alang"] = alang_val
+                        except Exception:
+                            pass
+                        self.audio_preference_changed.emit(alang_val)
+                self.tracks_changed.emit(self._get_synchronized_track_list())
             except Exception as e:
                 print(f"Audio track error: {e}")
 
@@ -661,7 +937,12 @@ class PlayerController(QObject):
         self._preferred_audio_lang = lang_str
         if self._player:
             try:
-                self._player["alang"] = lang_str or "fre,fra,fr"
+                family = get_track_lang_family({"lang": lang_str, "title": lang_str}) or lang_str
+                if family in LANGUAGE_GROUPS:
+                    alang_val = ",".join(LANGUAGE_GROUPS[family][0])
+                else:
+                    alang_val = lang_str or "fre,fra,fr"
+                self._player["alang"] = alang_val
             except Exception:
                 pass
 
@@ -672,15 +953,32 @@ class PlayerController(QObject):
                 if track_id > 0:
                     self._player["sid"] = track_id
                     self._subtitles_enabled = True
-                    tracks = self._player["track-list"] or []
-                    lang = ""
+                    tracks = self._get_player_prop("track-list") or []
+                    chosen_track = None
                     for t in tracks:
                         if t.get("type") == "sub" and t.get("id") == track_id:
-                            lang = t.get("lang") or t.get("title") or ""
+                            chosen_track = t
                             break
-                    self._preferred_subtitle_lang = lang or "auto"
+
+                    is_forced = is_track_forced(chosen_track) if chosen_track else False
+                    family = get_track_lang_family(chosen_track) if chosen_track else None
+                    if not family and chosen_track:
+                        family = chosen_track.get("lang") or chosen_track.get("title") or "fra"
+                    if not family:
+                        family = "fra"
+
+                    self._preferred_subtitle_forced = is_forced
+                    if is_forced:
+                        self._preferred_subtitle_lang = f"{family}:forced"
+                    else:
+                        self._preferred_subtitle_lang = family
+
+                    if family in LANGUAGE_GROUPS:
+                        slang_val = ",".join(LANGUAGE_GROUPS[family][0])
+                    else:
+                        slang_val = family
                     try:
-                        self._player["slang"] = self._preferred_subtitle_lang
+                        self._player["slang"] = slang_val
                     except Exception:
                         pass
                     self.subtitle_preference_changed.emit(self._preferred_subtitle_lang, True)
@@ -688,11 +986,14 @@ class PlayerController(QObject):
                     self._player["sid"] = "no"
                     self._subtitles_enabled = False
                     self._preferred_subtitle_lang = "off"
+                    self._preferred_subtitle_forced = False
                     try:
                         self._player["slang"] = "no"
                     except Exception:
                         pass
                     self.subtitle_preference_changed.emit("off", False)
+
+                self.tracks_changed.emit(self._get_synchronized_track_list())
             except Exception as e:
                 print(f"Subtitle track error: {e}")
 
@@ -700,21 +1001,32 @@ class PlayerController(QObject):
         """Définit la préférence globale de sous-titres et met à jour MPV."""
         self._preferred_subtitle_lang = lang_str or "off"
         self._subtitles_enabled = enabled and (self._preferred_subtitle_lang != "off")
+        base_lang, is_forced = parse_subtitle_preference(self._preferred_subtitle_lang)
+        self._preferred_subtitle_forced = is_forced
         if self._player:
             try:
                 if not self._subtitles_enabled:
                     self._player["sid"] = "no"
                     self._player["slang"] = "no"
                 else:
-                    self._player["slang"] = self._preferred_subtitle_lang
+                    family = get_track_lang_family({"lang": base_lang, "title": base_lang}) or base_lang
+                    if family in LANGUAGE_GROUPS:
+                        slang_val = ",".join(LANGUAGE_GROUPS[family][0])
+                    else:
+                        slang_val = family or "fre,fra,fr"
+                    self._player["slang"] = slang_val
             except Exception:
                 pass
 
     def set_hwdec(self, hwdec: str):
         """Définit le mode d'accélération matérielle ('auto', 'd3d11va', 'nvdec', 'no')."""
+        self._hwdec_mode = hwdec or "auto"
         if self._player:
             try:
-                self._player["hwdec"] = hwdec
+                target_hwdec = self._hwdec_mode
+                if self._render_mode and target_hwdec.lower() == "auto":
+                    target_hwdec = "no"
+                self._player["hwdec"] = target_hwdec
             except Exception as e:
                 print(f"HWDec error: {e}")
 

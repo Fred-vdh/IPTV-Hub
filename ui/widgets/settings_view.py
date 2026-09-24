@@ -20,6 +20,7 @@ from core.sync_manager import (
     export_config_to_file,
     import_config_from_file,
 )
+from core.auto_sync_manager import format_last_sync
 from core.i18n import tr, I18nManager
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
 
@@ -27,6 +28,8 @@ from ui.icons import get_icon, DEFAULT_ICON_COLOR
 class SettingsView(QWidget):
     settings_saved = pyqtSignal()
     close_requested = pyqtSignal()
+    manual_sync_requested = pyqtSignal(str)
+    qr_sync_requested = pyqtSignal()
 
     def __init__(self, db: Database, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -34,11 +37,25 @@ class SettingsView(QWidget):
         self.settings: AppSettings = self.db.get_settings()
         self.setObjectName("settingsView")
         self._cards = []
+        self._current_playlist_id: Optional[int] = None
 
         self._init_ui()
         self._load_values()
 
-        I18nManager.instance().language_changed.connect(lambda _: self.retranslate_ui())
+        I18nManager.instance().language_changed.connect(self._on_language_changed)
+
+    def _on_language_changed(self, _=None):
+        try:
+            self.retranslate_ui()
+        except (RuntimeError, Exception):
+            pass
+
+    def closeEvent(self, event):
+        try:
+            I18nManager.instance().language_changed.disconnect(self._on_language_changed)
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def _init_ui(self):
         root_layout = QHBoxLayout(self)
@@ -78,7 +95,7 @@ class SettingsView(QWidget):
         self.btn_general = self._create_nav_btn(tr("Général & Interface"), "tune", 0, checked=True)
         self.btn_player = self._create_nav_btn(tr("Lecteur Vidéo"), "videocam", 1)
         self.btn_network = self._create_nav_btn(tr("Réseau & Flux"), "wifi", 2)
-        self.btn_epg = self._create_nav_btn(tr("Guide EPG"), "calendar_today", 3)
+        self.btn_epg = self._create_nav_btn(tr("Synchronisation & EPG"), "sync", 3)
         self.btn_storage = self._create_nav_btn(tr("Données & Stockage"), "storage", 4)
         self.btn_backup = self._create_nav_btn(tr("Sauvegarde & Fichiers"), "content_copy", 5)
         self.btn_about = self._create_nav_btn(tr("À propos"), "info", 6)
@@ -274,6 +291,19 @@ class SettingsView(QWidget):
         self.auto_play_next_cb.setChecked(True)
         c_layout.addWidget(self.auto_play_next_cb)
 
+        # Détection générique de début IntroDB
+        self.introdb_intro_cb = QCheckBox(" " + tr("Proposer de passer le générique de début (IntroDB)"))
+        self.introdb_intro_cb.setChecked(getattr(self.settings, "introdb_intro_skip", True))
+        self.introdb_intro_cb.setStyleSheet("color: #f1f5f9; font-size: 13px;")
+        c_layout.addWidget(self.introdb_intro_cb)
+
+        # Détection générique de fin IntroDB
+        self.introdb_outro_cb = QCheckBox(" " + tr("Détecter le début du générique de fin pour proposer l'épisode suivant (IntroDB)"))
+        self.introdb_outro_cb.setChecked(getattr(self.settings, "introdb_outro_skip", True))
+        self.introdb_outro_cb.setStyleSheet("margin-left: 20px; color: #94a3b8; font-size: 12px;")
+        self.auto_play_next_cb.toggled.connect(self.introdb_outro_cb.setEnabled)
+        c_layout.addWidget(self.introdb_outro_cb)
+
         layout.addWidget(card)
         layout.addStretch()
         return page
@@ -390,35 +420,187 @@ class SettingsView(QWidget):
         layout.setSpacing(16)
 
         card, c_layout = self._build_card(
-            "Guide Électronique des Programmes (EPG)",
-            "Fréquence de synchronisation et décalage horaire pour les programmes TV."
+            "Synchronisation automatique & Guide EPG",
+            "Planification des rafraîchissements et guide des programmes"
         )
 
-        # Intervalle d'actualisation EPG
-        r1 = QHBoxLayout()
-        self.lbl_epg_interval = QLabel(tr("Intervalle d'actualisation automatique :"))
-        r1.addWidget(self.lbl_epg_interval)
-        r1.addStretch()
-        self.epg_interval_spin = QSpinBox()
-        self.epg_interval_spin.setRange(1, 48)
-        self.epg_interval_spin.setSuffix(" " + tr("heures"))
-        self.epg_interval_spin.setValue(self.settings.epg_refresh_hours)
-        self.epg_interval_spin.setFixedWidth(140)
-        r1.addWidget(self.epg_interval_spin)
-        c_layout.addLayout(r1)
+        # 1. Chaînes en direct
+        self.sync_live_cb = QCheckBox(" " + tr("Synchroniser automatiquement les chaînes en direct"))
+        self.sync_live_cb.setStyleSheet("font-weight: 600; font-size: 13px; color: #f1f5f9;")
+        c_layout.addWidget(self.sync_live_cb)
 
-        # Décalage horaire EPG
-        r2 = QHBoxLayout()
+        r_live = QHBoxLayout()
+        r_live.setContentsMargins(22, 0, 0, 0)
+        self.lbl_sync_live_interval = QLabel(tr("Intervalle d'actualisation :"))
+        r_live.addWidget(self.lbl_sync_live_interval)
+        r_live.addStretch()
+        self.sync_live_spin = QSpinBox()
+        self.sync_live_spin.setRange(1, 90)
+        self.sync_live_spin.setSuffix(" " + tr("jour(s)"))
+        self.sync_live_spin.setFixedWidth(130)
+        r_live.addWidget(self.sync_live_spin)
+        c_layout.addLayout(r_live)
+
+        r_live_status = QHBoxLayout()
+        r_live_status.setContentsMargins(22, 0, 0, 4)
+        self.lbl_sync_live_status = QLabel(tr("Dernière synchronisation :") + " --")
+        self.lbl_sync_live_status.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        r_live_status.addWidget(self.lbl_sync_live_status)
+        r_live_status.addStretch()
+        self.btn_sync_live = QPushButton(" " + tr("Synchroniser"))
+        self.btn_sync_live.setIcon(get_icon("sync", color=DEFAULT_ICON_COLOR))
+        self.btn_sync_live.setProperty("class", "secondary-btn")
+        self.btn_sync_live.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sync_live.setFixedHeight(28)
+        self.btn_sync_live.clicked.connect(lambda: self.manual_sync_requested.emit("live"))
+        r_live_status.addWidget(self.btn_sync_live)
+        c_layout.addLayout(r_live_status)
+
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet("background-color: #26334d; margin: 4px 0;")
+        c_layout.addWidget(sep1)
+
+        # 2. Films VOD
+        self.sync_vod_cb = QCheckBox(" " + tr("Synchroniser automatiquement les films"))
+        self.sync_vod_cb.setStyleSheet("font-weight: 600; font-size: 13px; color: #f1f5f9;")
+        c_layout.addWidget(self.sync_vod_cb)
+
+        r_vod = QHBoxLayout()
+        r_vod.setContentsMargins(22, 0, 0, 0)
+        self.lbl_sync_vod_interval = QLabel(tr("Intervalle d'actualisation :"))
+        r_vod.addWidget(self.lbl_sync_vod_interval)
+        r_vod.addStretch()
+        self.sync_vod_spin = QSpinBox()
+        self.sync_vod_spin.setRange(1, 90)
+        self.sync_vod_spin.setSuffix(" " + tr("jour(s)"))
+        self.sync_vod_spin.setFixedWidth(130)
+        r_vod.addWidget(self.sync_vod_spin)
+        c_layout.addLayout(r_vod)
+
+        r_vod_status = QHBoxLayout()
+        r_vod_status.setContentsMargins(22, 0, 0, 4)
+        self.lbl_sync_vod_status = QLabel(tr("Dernière synchronisation :") + " --")
+        self.lbl_sync_vod_status.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        r_vod_status.addWidget(self.lbl_sync_vod_status)
+        r_vod_status.addStretch()
+        self.btn_sync_vod = QPushButton(" " + tr("Synchroniser"))
+        self.btn_sync_vod.setIcon(get_icon("sync", color=DEFAULT_ICON_COLOR))
+        self.btn_sync_vod.setProperty("class", "secondary-btn")
+        self.btn_sync_vod.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sync_vod.setFixedHeight(28)
+        self.btn_sync_vod.clicked.connect(lambda: self.manual_sync_requested.emit("vod"))
+        r_vod_status.addWidget(self.btn_sync_vod)
+        c_layout.addLayout(r_vod_status)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("background-color: #26334d; margin: 4px 0;")
+        c_layout.addWidget(sep2)
+
+        # 3. Séries TV
+        self.sync_series_cb = QCheckBox(" " + tr("Synchroniser automatiquement les séries"))
+        self.sync_series_cb.setStyleSheet("font-weight: 600; font-size: 13px; color: #f1f5f9;")
+        c_layout.addWidget(self.sync_series_cb)
+
+        r_series = QHBoxLayout()
+        r_series.setContentsMargins(22, 0, 0, 0)
+        self.lbl_sync_series_interval = QLabel(tr("Intervalle d'actualisation :"))
+        r_series.addWidget(self.lbl_sync_series_interval)
+        r_series.addStretch()
+        self.sync_series_spin = QSpinBox()
+        self.sync_series_spin.setRange(1, 90)
+        self.sync_series_spin.setSuffix(" " + tr("jour(s)"))
+        self.sync_series_spin.setFixedWidth(130)
+        r_series.addWidget(self.sync_series_spin)
+        c_layout.addLayout(r_series)
+
+        r_series_status = QHBoxLayout()
+        r_series_status.setContentsMargins(22, 0, 0, 4)
+        self.lbl_sync_series_status = QLabel(tr("Dernière synchronisation :") + " --")
+        self.lbl_sync_series_status.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        r_series_status.addWidget(self.lbl_sync_series_status)
+        r_series_status.addStretch()
+        self.btn_sync_series = QPushButton(" " + tr("Synchroniser"))
+        self.btn_sync_series.setIcon(get_icon("sync", color=DEFAULT_ICON_COLOR))
+        self.btn_sync_series.setProperty("class", "secondary-btn")
+        self.btn_sync_series.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sync_series.setFixedHeight(28)
+        self.btn_sync_series.clicked.connect(lambda: self.manual_sync_requested.emit("series"))
+        r_series_status.addWidget(self.btn_sync_series)
+        c_layout.addLayout(r_series_status)
+
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.Shape.HLine)
+        sep3.setStyleSheet("background-color: #26334d; margin: 4px 0;")
+        c_layout.addWidget(sep3)
+
+        # 4. Guide des programmes (EPG)
+        self.sync_epg_cb = QCheckBox(" " + tr("Synchroniser automatiquement le guide EPG"))
+        self.sync_epg_cb.setStyleSheet("font-weight: 600; font-size: 13px; color: #f1f5f9;")
+        c_layout.addWidget(self.sync_epg_cb)
+
+        r_epg = QHBoxLayout()
+        r_epg.setContentsMargins(22, 0, 0, 0)
+        self.lbl_epg_interval = QLabel(tr("Intervalle d'actualisation :"))
+        r_epg.addWidget(self.lbl_epg_interval)
+        r_epg.addStretch()
+        self.epg_interval_spin = QSpinBox()
+        self.epg_interval_spin.setRange(1, 90)
+        self.epg_interval_spin.setSuffix(" " + tr("jour(s)"))
+        self.epg_interval_spin.setFixedWidth(130)
+        r_epg.addWidget(self.epg_interval_spin)
+        c_layout.addLayout(r_epg)
+
+        r_epg_offset = QHBoxLayout()
+        r_epg_offset.setContentsMargins(22, 0, 0, 0)
         self.lbl_epg_offset = QLabel(tr("Décalage horaire EPG :"))
-        r2.addWidget(self.lbl_epg_offset)
-        r2.addStretch()
+        r_epg_offset.addWidget(self.lbl_epg_offset)
+        r_epg_offset.addStretch()
         self.epg_offset_spin = QSpinBox()
         self.epg_offset_spin.setRange(-12, 12)
         self.epg_offset_spin.setSuffix(" h")
         self.epg_offset_spin.setValue(0)
-        self.epg_offset_spin.setFixedWidth(140)
-        r2.addWidget(self.epg_offset_spin)
-        c_layout.addLayout(r2)
+        self.epg_offset_spin.setFixedWidth(130)
+        r_epg_offset.addWidget(self.epg_offset_spin)
+        c_layout.addLayout(r_epg_offset)
+
+        r_epg_status = QHBoxLayout()
+        r_epg_status.setContentsMargins(22, 0, 0, 4)
+        self.lbl_sync_epg_status = QLabel(tr("Dernière synchronisation :") + " --")
+        self.lbl_sync_epg_status.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        r_epg_status.addWidget(self.lbl_sync_epg_status)
+        r_epg_status.addStretch()
+        self.btn_sync_epg = QPushButton(" " + tr("Synchroniser"))
+        self.btn_sync_epg.setIcon(get_icon("sync", color=DEFAULT_ICON_COLOR))
+        self.btn_sync_epg.setProperty("class", "secondary-btn")
+        self.btn_sync_epg.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sync_epg.setFixedHeight(28)
+        self.btn_sync_epg.clicked.connect(lambda: self.manual_sync_requested.emit("epg"))
+        r_epg_status.addWidget(self.btn_sync_epg)
+        c_layout.addLayout(r_epg_status)
+
+        sep4 = QFrame()
+        sep4.setFrameShape(QFrame.Shape.HLine)
+        sep4.setStyleSheet("background-color: #26334d; margin: 6px 0;")
+        c_layout.addWidget(sep4)
+
+        # 5. Options au démarrage et bouton Global
+        self.sync_on_startup_cb = QCheckBox(" " + tr("Vérifier et synchroniser au démarrage de l'application"))
+        self.sync_on_startup_cb.setStyleSheet("font-size: 13px; color: #f1f5f9;")
+        c_layout.addWidget(self.sync_on_startup_cb)
+
+        r_all = QHBoxLayout()
+        r_all.setContentsMargins(0, 8, 0, 0)
+        r_all.addStretch()
+        self.btn_sync_all = QPushButton("  " + tr("Tout synchroniser maintenant"))
+        self.btn_sync_all.setIcon(get_icon("sync", color="#ffffff"))
+        self.btn_sync_all.setProperty("class", "primary-btn")
+        self.btn_sync_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_sync_all.setFixedHeight(34)
+        self.btn_sync_all.clicked.connect(lambda: self.manual_sync_requested.emit("all"))
+        r_all.addWidget(self.btn_sync_all)
+        c_layout.addLayout(r_all)
 
         layout.addWidget(card)
         layout.addStretch()
@@ -505,9 +687,53 @@ class SettingsView(QWidget):
 
         card, c_layout = self._build_card(
             "Sauvegarde & Configuration",
-            "Enregistrez ou restaurez votre configuration complète sous forme de fichier. "
-            "Vous pouvez facilement transférer ce fichier via une clé USB ou un dossier partagé vers un autre PC ou vers votre version Android TV."
+            "Enregistrez ou restaurez votre configuration complète sous forme de fichier ou via QR Code. "
+            "Vous pouvez facilement synchroniser avec un smartphone ou transférer un fichier vers un autre appareil."
         )
+
+        # 0. Passerelle Mobile QR Code
+        qr_box = QFrame()
+        qr_box.setStyleSheet("background-color: #161c28; border: 1px solid #312e81; border-radius: 8px; padding: 14px;")
+        qr_layout = QVBoxLayout(qr_box)
+        qr_layout.setSpacing(10)
+
+        self.qr_box_title = QLabel(tr("📱 Passerelle de synchronisation (QR Code)"))
+        self.qr_box_title.setStyleSheet("font-weight: 700; font-size: 14px; color: #a5b4fc;")
+        qr_layout.addWidget(self.qr_box_title)
+
+        self.qr_box_desc = QLabel(tr(
+            "Démarre un mini-serveur local sécurisé et affiche un QR Code à scanner avec votre smartphone. "
+            "Permet d'exporter ou d'importer vos favoris, playlists et reprises de lecture directement en réseau local."
+        ))
+        self.qr_box_desc.setStyleSheet("color: #94a3b8; font-size: 12px; line-height: 1.4;")
+        self.qr_box_desc.setWordWrap(True)
+        qr_layout.addWidget(self.qr_box_desc)
+
+        qr_btn_row = QHBoxLayout()
+        self.btn_open_qr_sync = QPushButton("  " + tr("Ouvrir la passerelle QR Code..."))
+        self.btn_open_qr_sync.setIcon(get_icon("qr_code", color="#ffffff"))
+        self.btn_open_qr_sync.setIconSize(QSize(18, 18))
+        self.btn_open_qr_sync.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_open_qr_sync.setStyleSheet("""
+            QPushButton {
+                background-color: #4f46e5;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #4338ca;
+            }
+        """)
+        self.btn_open_qr_sync.clicked.connect(self.qr_sync_requested.emit)
+        qr_btn_row.addWidget(self.btn_open_qr_sync)
+        qr_btn_row.addStretch()
+        qr_layout.addLayout(qr_btn_row)
+
+        c_layout.addWidget(qr_box)
 
         # 1. Section Exportation (Enregistrer)
         export_box = QFrame()
@@ -695,15 +921,80 @@ class SettingsView(QWidget):
         layout.addStretch()
         return page
 
+    def set_playlist_id(self, playlist_id: Optional[int]):
+        """Définit la playlist courante pour afficher les statuts de synchronisation récents."""
+        self._current_playlist_id = playlist_id
+        self.refresh_sync_status()
+
+    def refresh_sync_status(self, playlist_id: Optional[int] = None):
+        """Met à jour l'affichage des horodatages de synchronisation des 4 flux."""
+        target_id = playlist_id or self._current_playlist_id
+        if not target_id:
+            pls = self.db.get_playlists()
+            if pls:
+                target_id = pls[0].id
+                self._current_playlist_id = target_id
+
+        if not target_id:
+            if hasattr(self, "lbl_sync_live_status"):
+                self.lbl_sync_live_status.setText(f"{tr('Dernière synchronisation :')} {tr('Jamais')}")
+            if hasattr(self, "lbl_sync_vod_status"):
+                self.lbl_sync_vod_status.setText(f"{tr('Dernière synchronisation :')} {tr('Jamais')}")
+            if hasattr(self, "lbl_sync_series_status"):
+                self.lbl_sync_series_status.setText(f"{tr('Dernière synchronisation :')} {tr('Jamais')}")
+            if hasattr(self, "lbl_sync_epg_status"):
+                self.lbl_sync_epg_status.setText(f"{tr('Dernière synchronisation :')} {tr('Jamais')}")
+            return
+
+        ts_map = self.db.get_playlist_sync_timestamps(target_id)
+        if hasattr(self, "lbl_sync_live_status"):
+            self.lbl_sync_live_status.setText(f"{tr('Dernière synchronisation :')} <b style='color:#cbd5e1;'>{format_last_sync(ts_map.get('live'))}</b>")
+        if hasattr(self, "lbl_sync_vod_status"):
+            self.lbl_sync_vod_status.setText(f"{tr('Dernière synchronisation :')} <b style='color:#cbd5e1;'>{format_last_sync(ts_map.get('vod'))}</b>")
+        if hasattr(self, "lbl_sync_series_status"):
+            self.lbl_sync_series_status.setText(f"{tr('Dernière synchronisation :')} <b style='color:#cbd5e1;'>{format_last_sync(ts_map.get('series'))}</b>")
+        if hasattr(self, "lbl_sync_epg_status"):
+            self.lbl_sync_epg_status.setText(f"{tr('Dernière synchronisation :')} <b style='color:#cbd5e1;'>{format_last_sync(ts_map.get('epg'))}</b>")
+
     def _load_values(self):
         self.settings = self.db.get_settings()
         self.ua_edit.setText(self.settings.user_agent)
         self.timeout_spin.setValue(getattr(self.settings, "http_timeout", 15))
         self.buffer_spin.setValue(self.settings.buffer_size_mb)
         self.auto_reconnect_cb.setChecked(getattr(self.settings, "auto_reconnect", True))
-        self.epg_interval_spin.setValue(self.settings.epg_refresh_hours)
         self.download_dir_edit.setText(self.settings.download_dir or get_default_download_dir())
         self.auto_play_next_cb.setChecked(getattr(self.settings, "auto_play_next_episode", True))
+        if hasattr(self, "introdb_intro_cb"):
+            self.introdb_intro_cb.setChecked(getattr(self.settings, "introdb_intro_skip", True))
+        if hasattr(self, "introdb_outro_cb"):
+            self.introdb_outro_cb.setChecked(getattr(self.settings, "introdb_outro_skip", True))
+            self.introdb_outro_cb.setEnabled(self.auto_play_next_cb.isChecked())
+
+        # Auto-Sync & EPG
+        if hasattr(self, "sync_live_cb"):
+            self.sync_live_cb.setChecked(getattr(self.settings, "auto_sync_live", True))
+        if hasattr(self, "sync_live_spin"):
+            self.sync_live_spin.setValue(getattr(self.settings, "sync_interval_live_days", 1))
+
+        if hasattr(self, "sync_vod_cb"):
+            self.sync_vod_cb.setChecked(getattr(self.settings, "auto_sync_vod", True))
+        if hasattr(self, "sync_vod_spin"):
+            self.sync_vod_spin.setValue(getattr(self.settings, "sync_interval_vod_days", 3))
+
+        if hasattr(self, "sync_series_cb"):
+            self.sync_series_cb.setChecked(getattr(self.settings, "auto_sync_series", True))
+        if hasattr(self, "sync_series_spin"):
+            self.sync_series_spin.setValue(getattr(self.settings, "sync_interval_series_days", 2))
+
+        if hasattr(self, "sync_epg_cb"):
+            self.sync_epg_cb.setChecked(getattr(self.settings, "auto_refresh_epg", True))
+        if hasattr(self, "epg_interval_spin"):
+            self.epg_interval_spin.setValue(getattr(self.settings, "epg_refresh_days", 1))
+
+        if hasattr(self, "sync_on_startup_cb"):
+            self.sync_on_startup_cb.setChecked(getattr(self.settings, "sync_on_startup", True))
+
+        self.refresh_sync_status()
 
         # Langue audio préférée
         pref_lang = (self.settings.preferred_audio_lang or "").lower()
@@ -754,11 +1045,38 @@ class SettingsView(QWidget):
     def _save_settings(self):
         self.settings.user_agent = self.ua_edit.text().strip() or "Mozilla/5.0"
         self.settings.buffer_size_mb = self.buffer_spin.value()
-        self.settings.epg_refresh_hours = self.epg_interval_spin.value()
         self.settings.download_dir = self.download_dir_edit.text().strip()
         self.settings.preferred_audio_lang = self.audio_lang_combo.currentData() or ""
         self.settings.auto_play_next_episode = self.auto_play_next_cb.isChecked()
+        if hasattr(self, "introdb_intro_cb"):
+            self.settings.introdb_intro_skip = self.introdb_intro_cb.isChecked()
+        if hasattr(self, "introdb_outro_cb"):
+            self.settings.introdb_outro_skip = self.introdb_outro_cb.isChecked()
         self.settings.app_language = self.app_lang_combo.currentData() or "fr"
+
+        # Auto-Sync & EPG
+        if hasattr(self, "sync_live_cb"):
+            self.settings.auto_sync_live = self.sync_live_cb.isChecked()
+        if hasattr(self, "sync_live_spin"):
+            self.settings.sync_interval_live_days = self.sync_live_spin.value()
+
+        if hasattr(self, "sync_vod_cb"):
+            self.settings.auto_sync_vod = self.sync_vod_cb.isChecked()
+        if hasattr(self, "sync_vod_spin"):
+            self.settings.sync_interval_vod_days = self.sync_vod_spin.value()
+
+        if hasattr(self, "sync_series_cb"):
+            self.settings.auto_sync_series = self.sync_series_cb.isChecked()
+        if hasattr(self, "sync_series_spin"):
+            self.settings.sync_interval_series_days = self.sync_series_spin.value()
+
+        if hasattr(self, "sync_epg_cb"):
+            self.settings.auto_refresh_epg = self.sync_epg_cb.isChecked()
+        if hasattr(self, "epg_interval_spin"):
+            self.settings.epg_refresh_days = self.epg_interval_spin.value()
+
+        if hasattr(self, "sync_on_startup_cb"):
+            self.settings.sync_on_startup = self.sync_on_startup_cb.isChecked()
 
         # hwdec
         hw_txt = self.hwdec_combo.currentText().split()[0]
@@ -793,6 +1111,12 @@ class SettingsView(QWidget):
 
     def retranslate_ui(self, *args):
         """Met à jour dynamiquement tous les libellés de l'écran des paramètres."""
+        try:
+            self._retranslate_ui_impl()
+        except (RuntimeError, Exception):
+            pass
+
+    def _retranslate_ui_impl(self):
         # Navigation latérale et en-tête
         if hasattr(self, "nav_title"):
             self.nav_title.setText(tr("Paramètres"))
@@ -808,7 +1132,7 @@ class SettingsView(QWidget):
         if hasattr(self, "btn_network"):
             self.btn_network.setText("  " + tr("Réseau & Flux"))
         if hasattr(self, "btn_epg"):
-            self.btn_epg.setText("  " + tr("Guide EPG"))
+            self.btn_epg.setText("  " + tr("Synchronisation & EPG"))
         if hasattr(self, "btn_storage"):
             self.btn_storage.setText("  " + tr("Données & Stockage"))
         if hasattr(self, "btn_backup"):
@@ -850,6 +1174,10 @@ class SettingsView(QWidget):
             self.auto_resume_cb.setText(" " + tr("Reprendre automatiquement la dernière chaîne au lancement"))
         if hasattr(self, "auto_play_next_cb"):
             self.auto_play_next_cb.setText(" " + tr("Enchaîner automatiquement sur l'épisode suivant à la fin d'un épisode (Séries)"))
+        if hasattr(self, "introdb_intro_cb"):
+            self.introdb_intro_cb.setText(" " + tr("Proposer de passer le générique de début (IntroDB)"))
+        if hasattr(self, "introdb_outro_cb"):
+            self.introdb_outro_cb.setText(" " + tr("Détecter le début du générique de fin pour proposer l'épisode suivant (IntroDB)"))
 
         # Page Lecteur Vidéo
         if hasattr(self, "lbl_hwdec"):
@@ -873,13 +1201,51 @@ class SettingsView(QWidget):
         if hasattr(self, "auto_reconnect_cb"):
             self.auto_reconnect_cb.setText(" " + tr("Reconnexion automatique en cas de coupure de flux"))
 
-        # Page EPG
+        # Page Synchronisation & EPG
+        if hasattr(self, "sync_live_cb"):
+            self.sync_live_cb.setText(" " + tr("Synchroniser automatiquement les chaînes en direct"))
+        if hasattr(self, "lbl_sync_live_interval"):
+            self.lbl_sync_live_interval.setText(tr("Intervalle d'actualisation :"))
+        if hasattr(self, "sync_live_spin"):
+            self.sync_live_spin.setSuffix(" " + tr("jour(s)"))
+        if hasattr(self, "btn_sync_live"):
+            self.btn_sync_live.setText(" " + tr("Synchroniser"))
+
+        if hasattr(self, "sync_vod_cb"):
+            self.sync_vod_cb.setText(" " + tr("Synchroniser automatiquement les films"))
+        if hasattr(self, "lbl_sync_vod_interval"):
+            self.lbl_sync_vod_interval.setText(tr("Intervalle d'actualisation :"))
+        if hasattr(self, "sync_vod_spin"):
+            self.sync_vod_spin.setSuffix(" " + tr("jour(s)"))
+        if hasattr(self, "btn_sync_vod"):
+            self.btn_sync_vod.setText(" " + tr("Synchroniser"))
+
+        if hasattr(self, "sync_series_cb"):
+            self.sync_series_cb.setText(" " + tr("Synchroniser automatiquement les séries"))
+        if hasattr(self, "lbl_sync_series_interval"):
+            self.lbl_sync_series_interval.setText(tr("Intervalle d'actualisation :"))
+        if hasattr(self, "sync_series_spin"):
+            self.sync_series_spin.setSuffix(" " + tr("jour(s)"))
+        if hasattr(self, "btn_sync_series"):
+            self.btn_sync_series.setText(" " + tr("Synchroniser"))
+
+        if hasattr(self, "sync_epg_cb"):
+            self.sync_epg_cb.setText(" " + tr("Synchroniser automatiquement le guide EPG"))
         if hasattr(self, "lbl_epg_interval"):
-            self.lbl_epg_interval.setText(tr("Intervalle d'actualisation automatique :"))
+            self.lbl_epg_interval.setText(tr("Intervalle d'actualisation :"))
         if hasattr(self, "epg_interval_spin"):
-            self.epg_interval_spin.setSuffix(" " + tr("heures"))
+            self.epg_interval_spin.setSuffix(" " + tr("jour(s)"))
         if hasattr(self, "lbl_epg_offset"):
             self.lbl_epg_offset.setText(tr("Décalage horaire EPG :"))
+        if hasattr(self, "btn_sync_epg"):
+            self.btn_sync_epg.setText(" " + tr("Synchroniser"))
+
+        if hasattr(self, "sync_on_startup_cb"):
+            self.sync_on_startup_cb.setText(" " + tr("Vérifier et synchroniser au démarrage de l'application"))
+        if hasattr(self, "btn_sync_all"):
+            self.btn_sync_all.setText("  " + tr("Tout synchroniser maintenant"))
+
+        self.refresh_sync_status()
 
         # Page Stockage
         if hasattr(self, "lbl_dl"):
@@ -892,6 +1258,15 @@ class SettingsView(QWidget):
             self.clear_cache_btn.setText("  " + tr("Vider le cache des logos de chaînes"))
 
         # Page Sauvegarde
+        if hasattr(self, "qr_box_title"):
+            self.qr_box_title.setText(tr("📱 Passerelle de synchronisation (QR Code)"))
+        if hasattr(self, "qr_box_desc"):
+            self.qr_box_desc.setText(tr(
+                "Démarre un mini-serveur local sécurisé et affiche un QR Code à scanner avec votre smartphone. "
+                "Permet d'exporter ou d'importer vos favoris, playlists et reprises de lecture directement en réseau local."
+            ))
+        if hasattr(self, "btn_open_qr_sync"):
+            self.btn_open_qr_sync.setText("  " + tr("Ouvrir la passerelle QR Code..."))
         if hasattr(self, "exp_title"):
             self.exp_title.setText(tr("💾 Enregistrer la configuration (Sauvegarde)"))
         if hasattr(self, "exp_desc"):

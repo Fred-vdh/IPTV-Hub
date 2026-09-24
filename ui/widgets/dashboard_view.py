@@ -1217,10 +1217,10 @@ class DashboardView(QWidget):
         self.hero_banner.resume_clicked.connect(self.resume_playback_requested.emit)
         self.container_layout.addWidget(self.hero_banner)
 
-        # 2. Section "Reprendre la lecture"
+        # 2. Section "Reprendre la lecture" (Récemment regardé)
         see_all_str = tr("Voir tout") + " >"
-        self.sec_continue = DashboardSection(tr("Reprendre la lecture"), "continue", see_all_str, content_height=262, parent=self.container_widget)
-        self.sec_continue.see_all_clicked.connect(lambda: self.navigate_section_requested.emit("favorites"))
+        self.sec_continue = DashboardSection(tr("Reprendre la lecture"), "history", see_all_str, content_height=262, parent=self.container_widget)
+        self.sec_continue.see_all_clicked.connect(self.navigate_section_requested.emit)
         self.container_layout.addWidget(self.sec_continue)
 
         # 3. Section "TV en direct récemment regardée"
@@ -1320,6 +1320,17 @@ class DashboardView(QWidget):
             limit=30
         )
         fav_vod_series = [c for c in fav_channels if c.stream_type in ("movie", "series")]
+        unique_fav_vod = []
+        seen_fav_keys = set()
+        for c in fav_vod_series:
+            clean_n = re.sub(r"\s+", " ", (c.name or "").lower().strip())
+            key = (clean_n, c.stream_type, c.playlist_id)
+            if key in seen_fav_keys:
+                continue
+            seen_fav_keys.add(key)
+            unique_fav_vod.append(c)
+        fav_vod_series = unique_fav_vod
+
         self.sec_favs.clear_items()
         self.sec_favs.set_badge_count(len(fav_vod_series))
         self.sec_favs.set_see_all_text(tr("Voir les {count} >", count=len(fav_vod_series)) if fav_vod_series else (tr("Voir tout") + " >"))

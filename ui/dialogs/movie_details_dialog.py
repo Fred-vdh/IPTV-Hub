@@ -511,11 +511,12 @@ class MovieDetailsDialog(QDialog):
 
     def _fetch_extra_info(self):
         if self.playlist and self.playlist.playlist_type == "xtream" and self.channel.stream_id:
+            ua = self.channel.user_agent or getattr(self.playlist, "user_agent", "") or getattr(self.db.get_settings(), "user_agent", "")
             client = XtreamClient(
                 self.playlist.server_url,
                 self.playlist.username,
                 self.playlist.password,
-                self.channel.user_agent or self.playlist.user_agent
+                ua
             )
             self.worker = MovieInfoWorker(client, self.channel.stream_id, self)
             self.worker.finished.connect(self._on_extra_info_loaded)

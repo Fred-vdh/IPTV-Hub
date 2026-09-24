@@ -113,6 +113,7 @@ def export_sync_data(db: Database) -> Dict[str, Any]:
         "persistent_disabled_channels": [],
         "persistent_disabled_groups": [],
         "category_sort_preferences": [],
+        "custom_channel_lists": [],
         "settings": {},
     }
 
@@ -143,6 +144,7 @@ def export_sync_data(db: Database) -> Dict[str, Any]:
         cursor.execute("""
             SELECT channel_id, stream_url, channel_name, playback_position, duration, updated_at
             FROM playback_progress
+            ORDER BY updated_at DESC
         """)
         for r in cursor.fetchall():
             sync_payload["playback_progress"].append({
@@ -234,6 +236,36 @@ def export_sync_data(db: Database) -> Dict[str, Any]:
             if k not in EXCLUDED_SETTINGS_KEYS:
                 sync_payload["settings"][k] = r["value"]
 
+        # 9. Listes de chaînes personnalisées (ex: Salon HD, Van SD)
+        cursor.execute("SELECT id, name, created_at, sort_order FROM custom_channel_lists ORDER BY sort_order ASC, id ASC")
+        for cl in cursor.fetchall():
+            cl_id = cl["id"]
+            cursor.execute("""
+                SELECT channel_name, stream_url, stream_id, stream_type, logo_url, group_title, order_index, added_at
+                FROM custom_channel_list_items
+                WHERE list_id = ?
+                ORDER BY order_index ASC, id ASC
+            """, (cl_id,))
+            items = [
+                {
+                    "channel_name": item["channel_name"],
+                    "stream_url": item["stream_url"],
+                    "stream_id": item["stream_id"],
+                    "stream_type": item["stream_type"],
+                    "logo_url": item["logo_url"],
+                    "group_title": item["group_title"],
+                    "order_index": item["order_index"],
+                    "added_at": item["added_at"],
+                }
+                for item in cursor.fetchall()
+            ]
+            sync_payload["custom_channel_lists"].append({
+                "name": cl["name"],
+                "created_at": cl["created_at"],
+                "sort_order": cl["sort_order"],
+                "items": items
+            })
+
     return sync_payload
 
 
@@ -247,6 +279,7 @@ def merge_sync_data(db: Database, remote_data: Dict[str, Any]) -> Dict[str, int]
     raw_favorites = remote_data.get("persistent_favorites", [])
     raw_disabled_groups = remote_data.get("persistent_disabled_groups", [])
     raw_disabled_channels = remote_data.get("persistent_disabled_channels", [])
+    raw_custom_lists = remote_data.get("custom_channel_lists", [])
     raw_settings = [k for k in remote_data.get("settings", {}).keys() if k not in EXCLUDED_SETTINGS_KEYS]
 
     stats = {
@@ -255,12 +288,15 @@ def merge_sync_data(db: Database, remote_data: Dict[str, Any]) -> Dict[str, int]
         "favorites": len(raw_favorites),
         "disabled_channels": len(raw_disabled_channels),
         "disabled_groups": len(raw_disabled_groups),
+        "custom_lists": len(raw_custom_lists),
         "settings": len(raw_settings),
 
         "progress_updated": 0,
         "favorites_added": 0,
         "disabled_groups_added": 0,
         "disabled_channels_added": 0,
+        "custom_lists_added": 0,
+        "custom_list_items_added": 0,
         "playlists_synced": 0,
     }
 
@@ -454,6 +490,47 @@ def merge_sync_data(db: Database, remote_data: Dict[str, Any]) -> Dict[str, int]
         for k, v in remote_data.get("settings", {}).items():
             if k not in EXCLUDED_SETTINGS_KEYS:
                 cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, str(v)))
+
+        # 9. Listes de chaînes personnalisées (Union & conservation)
+        for r_list in remote_data.get("custom_channel_lists", []):
+            list_name = str(r_list.get("name") or "").strip()
+            if not list_name:
+                continue
+
+            cursor.execute("SELECT id FROM custom_channel_lists WHERE name = ?", (list_name,))
+            loc_row = cursor.fetchone()
+            if loc_row:
+                loc_list_id = loc_row["id"]
+            else:
+                cursor.execute("""
+                    INSERT INTO custom_channel_lists (name, created_at, sort_order)
+                    VALUES (?, ?, ?)
+                """, (list_name, r_list.get("created_at") or datetime.now().isoformat(), r_list.get("sort_order", 0)))
+                loc_list_id = cursor.lastrowid
+                stats["custom_lists_added"] += 1
+
+            for item in r_list.get("items", []):
+                ch_name = str(item.get("channel_name") or "").strip()
+                if not ch_name:
+                    continue
+                cursor.execute("""
+                    INSERT OR IGNORE INTO custom_channel_list_items (
+                        list_id, channel_name, stream_url, stream_id, stream_type,
+                        logo_url, group_title, order_index, added_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    loc_list_id,
+                    ch_name,
+                    item.get("stream_url") or "",
+                    str(item.get("stream_id") or "") if item.get("stream_id") is not None else None,
+                    item.get("stream_type") or "live",
+                    item.get("logo_url") or "",
+                    item.get("group_title") or "Personnalisé",
+                    item.get("order_index", 0),
+                    item.get("added_at") or datetime.now().isoformat()
+                ))
+                if cursor.rowcount > 0:
+                    stats["custom_list_items_added"] += 1
 
         conn.commit()
 

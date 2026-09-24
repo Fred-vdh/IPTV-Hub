@@ -1,6 +1,6 @@
 """
 Panneau des catégories de chaînes IPTV (colonne gauche style IPTVnator).
-Affiche la liste des catégories avec compteurs, recherche, tri et filtres.
+Affiche la liste des catégories avec compteurs, recherche, tri, filtres et listes personnalisées (Salon HD, Van SD...).
 """
 
 from typing import List, Tuple, Optional
@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QLineEdit, QMenu, QFrame,
     QAbstractItemView
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QCursor
 
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
@@ -19,28 +19,82 @@ from core.i18n import tr
 
 class CategoryItemWidget(QFrame):
     clicked = pyqtSignal(str)
+    custom_clicked = pyqtSignal(int, str)
+    rename_requested = pyqtSignal(int, str)
+    delete_requested = pyqtSignal(int, str)
 
-    def __init__(self, name: str, count: int, is_selected: bool = False, parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        name: str,
+        count: int,
+        is_selected: bool = False,
+        is_custom: bool = False,
+        custom_list_id: Optional[int] = None,
+        parent: Optional[QWidget] = None
+    ):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.name = name
         self.count = count
         self.is_selected = is_selected
+        self.is_custom = is_custom
+        self.custom_list_id = custom_list_id
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._init_ui()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self.name)
+            if self.is_custom and self.custom_list_id is not None:
+                self.custom_clicked.emit(self.custom_list_id, self.name)
+            else:
+                self.clicked.emit(self.name)
         super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event):
+        if self.is_custom and self.custom_list_id is not None:
+            menu = QMenu(self)
+            menu.setStyleSheet("""
+                QMenu {
+                    background-color: #1f283b;
+                    border: 1px solid #313f5c;
+                    border-radius: 8px;
+                    padding: 4px;
+                    color: #f1f5f9;
+                }
+                QMenu::item {
+                    padding: 6px 16px;
+                    border-radius: 4px;
+                }
+                QMenu::item:selected {
+                    background-color: #3b82f6;
+                    color: #ffffff;
+                }
+            """)
+            act_rename = menu.addAction(get_icon("edit", color="#38bdf8"), tr("Renommer la liste..."))
+            act_delete = menu.addAction(get_icon("delete", color="#f87171"), tr("Supprimer la liste"))
+
+            action = menu.exec(event.globalPos())
+            if action == act_rename:
+                self.rename_requested.emit(self.custom_list_id, self.name)
+            elif action == act_delete:
+                self.delete_requested.emit(self.custom_list_id, self.name)
+            event.accept()
+        else:
+            super().contextMenuEvent(event)
 
     def _init_ui(self):
         self.setObjectName("categoryCard")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 4, 10, 4)
+        layout.setContentsMargins(12, 4, 10, 4)
         layout.setSpacing(8)
 
-        display_name = tr(clean_category_display_name(self.name))
+        # Si liste personnalisée, afficher l'icône liste
+        if self.is_custom:
+            icon_lbl = QLabel()
+            icon_lbl.setPixmap(get_icon("playlist_play", color="#38bdf8").pixmap(16, 16))
+            layout.addWidget(icon_lbl)
+
+        display_name = self.name if self.is_custom else tr(clean_category_display_name(self.name))
         self.name_label = QLabel(display_name)
         layout.addWidget(self.name_label, stretch=1)
 
@@ -52,22 +106,40 @@ class CategoryItemWidget(QFrame):
     def set_selected(self, selected: bool):
         self.is_selected = selected
         if selected:
-            self.setStyleSheet("""
-                QFrame#categoryCard {
-                    background-color: rgba(37, 99, 235, 0.18);
-                    border: 1.5px solid #3b82f6;
-                    border-radius: 10px;
-                }
-            """)
-            self.name_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #93c5fd;")
-            self.count_badge.setStyleSheet("""
-                background-color: rgba(37, 99, 235, 0.4);
-                color: #93c5fd;
-                font-size: 11px;
-                font-weight: 700;
-                padding: 2px 8px;
-                border-radius: 8px;
-            """)
+            if self.is_custom:
+                self.setStyleSheet("""
+                    QFrame#categoryCard {
+                        background-color: rgba(56, 189, 248, 0.18);
+                        border: 1.5px solid #38bdf8;
+                        border-radius: 10px;
+                    }
+                """)
+                self.name_label.setStyleSheet("font-size: 13px; font-weight: 700; color: #bae6fd;")
+                self.count_badge.setStyleSheet("""
+                    background-color: rgba(56, 189, 248, 0.4);
+                    color: #bae6fd;
+                    font-size: 11px;
+                    font-weight: 700;
+                    padding: 2px 8px;
+                    border-radius: 8px;
+                """)
+            else:
+                self.setStyleSheet("""
+                    QFrame#categoryCard {
+                        background-color: rgba(37, 99, 235, 0.18);
+                        border: 1.5px solid #3b82f6;
+                        border-radius: 10px;
+                    }
+                """)
+                self.name_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #93c5fd;")
+                self.count_badge.setStyleSheet("""
+                    background-color: rgba(37, 99, 235, 0.4);
+                    color: #93c5fd;
+                    font-size: 11px;
+                    font-weight: 700;
+                    padding: 2px 8px;
+                    border-radius: 8px;
+                """)
         else:
             self.setStyleSheet("""
                 QFrame#categoryCard {
@@ -79,20 +151,35 @@ class CategoryItemWidget(QFrame):
                     background-color: rgba(30, 41, 59, 0.6);
                 }
             """)
-            self.name_label.setStyleSheet("font-size: 13px; font-weight: 500; color: #e2e8f0;")
-            self.count_badge.setStyleSheet("""
-                background-color: rgba(30, 41, 59, 0.7);
-                color: #64748b;
-                font-size: 11px;
-                font-weight: 600;
-                padding: 2px 8px;
-                border-radius: 8px;
-            """)
+            if self.is_custom:
+                self.name_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #38bdf8;")
+                self.count_badge.setStyleSheet("""
+                    background-color: rgba(56, 189, 248, 0.15);
+                    color: #38bdf8;
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 2px 8px;
+                    border-radius: 8px;
+                """)
+            else:
+                self.name_label.setStyleSheet("font-size: 13px; font-weight: 500; color: #e2e8f0;")
+                self.count_badge.setStyleSheet("""
+                    background-color: rgba(30, 41, 59, 0.7);
+                    color: #64748b;
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 2px 8px;
+                    border-radius: 8px;
+                """)
 
 
 class CategoriesPanel(QFrame):
     category_selected = pyqtSignal(str)
+    custom_list_selected = pyqtSignal(int, str)
     manage_categories_requested = pyqtSignal()
+    manage_custom_lists_requested = pyqtSignal()
+    custom_list_renamed = pyqtSignal(int, str)
+    custom_list_deleted = pyqtSignal(int, str)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -107,7 +194,10 @@ class CategoriesPanel(QFrame):
         """)
 
         self._all_categories: List[Tuple[str, int]] = []
+        self._custom_lists: List[Tuple[int, str, int]] = []
+        self.stream_type: str = "live"
         self._current_selected_cat = "Toutes les chaînes"
+        self._current_selected_custom_list_id: Optional[int] = None
         self._active_category_widget: Optional[CategoryItemWidget] = None
         self._sort_mode = "default"  # "default", "name_asc", "name_desc", "count"
 
@@ -118,7 +208,7 @@ class CategoriesPanel(QFrame):
         layout.setContentsMargins(10, 12, 10, 10)
         layout.setSpacing(8)
 
-        # 1. En-tête : Titre + Boutons d'action (Recherche, Tri, Filtre)
+        # 1. En-tête : Titre + Boutons d'action (Listes perso, Recherche, Tri, Filtre)
         header_row = QHBoxLayout()
         header_row.setContentsMargins(4, 0, 4, 0)
         header_row.setSpacing(4)
@@ -207,20 +297,96 @@ class CategoriesPanel(QFrame):
         self.list_widget.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self.list_widget)
 
+    def set_stream_type(self, stream_type: str):
+        """Définit le type de flux ('live', 'movie', 'series', etc.).
+
+        Si ce n'est pas le direct, les listes personnalisées sont purgées immédiatement.
+        """
+        self.stream_type = stream_type
+        if self.stream_type != "live":
+            self._custom_lists = []
+            self._current_selected_custom_list_id = None
+
     def set_title(self, title: str):
         self._title_key = title
         self.title_label.setText(tr(title))
+        # Détection automatique du stream_type si non synchronisé
+        t_lower = title.lower()
+        if "film" in t_lower or "movie" in t_lower or "vod" in t_lower:
+            self.set_stream_type("movie")
+        elif "série" in t_lower or "serie" in t_lower:
+            self.set_stream_type("series")
+        elif "direct" in t_lower or "live" in t_lower:
+            self.set_stream_type("live")
+        elif any(k in t_lower for k in ("tableau", "dashboard", "favori", "récent", "recent")):
+            self.set_stream_type("other")
 
     def set_categories(self, categories: List[Tuple[str, int]], default_selected: Optional[str] = None):
         self._all_categories = categories
-        if default_selected:
+        if self.stream_type != "live":
+            self._custom_lists = []
+            self._current_selected_custom_list_id = None
+
+        if self._current_selected_custom_list_id is not None:
+            if any(cl[0] == self._current_selected_custom_list_id for cl in self._custom_lists):
+                # Conserver la sélection de la liste personnalisée en cours
+                pass
+            else:
+                self._current_selected_custom_list_id = None
+                self._current_selected_cat = default_selected or ""
+        elif self._current_selected_cat and any(c[0] == self._current_selected_cat for c in categories):
+            # Conserver la catégorie standard sélectionnée
+            pass
+        elif default_selected:
             self._current_selected_cat = default_selected
+            self._current_selected_custom_list_id = None
+        self._render_categories()
+
+    def set_custom_lists(self, custom_lists: List[Tuple[int, str, int]]):
+        """Définit les listes personnalisées (id, nom, count) à afficher en haut."""
+        if self.stream_type != "live":
+            self._custom_lists = []
+            self._current_selected_custom_list_id = None
+            return
+
+        self._custom_lists = custom_lists
+        if self._current_selected_custom_list_id is not None:
+            if not any(cl[0] == self._current_selected_custom_list_id for cl in custom_lists):
+                self._current_selected_custom_list_id = None
         self._render_categories()
 
     def _render_categories(self):
         self.list_widget.clear()
         search_txt = self.search_edit.text().strip().lower()
 
+        # 1. Rendu des listes personnalisées (strictement réservé aux chaînes en direct)
+        if self._custom_lists and self.stream_type == "live":
+            for list_id, list_name, count in self._custom_lists:
+                if search_txt and search_txt not in list_name.lower():
+                    continue
+
+                item = QListWidgetItem(self.list_widget)
+                is_sel = (self._current_selected_custom_list_id == list_id)
+                widget = CategoryItemWidget(
+                    list_name,
+                    count,
+                    is_selected=is_sel,
+                    is_custom=True,
+                    custom_list_id=list_id
+                )
+                widget.custom_clicked.connect(self._on_custom_list_clicked)
+                widget.rename_requested.connect(self.custom_list_renamed.emit)
+                widget.delete_requested.connect(self.custom_list_deleted.emit)
+
+                if is_sel:
+                    self._active_category_widget = widget
+                item.setSizeHint(QSize(0, 38))
+                self.list_widget.setItemWidget(item, widget)
+                if is_sel:
+                    self.list_widget.setCurrentItem(item)
+                    self.list_widget.scrollToItem(item)
+
+        # 2. Rendu des catégories standard du fournisseur
         cats = list(self._all_categories)
 
         if self._sort_mode == "name_asc":
@@ -229,7 +395,6 @@ class CategoriesPanel(QFrame):
             cats.sort(key=lambda x: x[0].lower(), reverse=True)
         elif self._sort_mode == "count":
             cats.sort(key=lambda x: x[1], reverse=True)
-        # "default" conserve l'ordre exact transmis par le serveur
 
         for name, count in cats:
             display_name = tr(clean_category_display_name(name))
@@ -237,8 +402,9 @@ class CategoriesPanel(QFrame):
                 continue
 
             item = QListWidgetItem(self.list_widget)
-            is_sel = (name.strip().lower() == self._current_selected_cat.strip().lower())
-            widget = CategoryItemWidget(name, count, is_selected=is_sel)
+            is_sel = (self._current_selected_custom_list_id is None and
+                      name.strip().lower() == self._current_selected_cat.strip().lower())
+            widget = CategoryItemWidget(name, count, is_selected=is_sel, is_custom=False)
             widget.clicked.connect(self._select_category_by_name)
             if is_sel:
                 self._active_category_widget = widget
@@ -246,31 +412,62 @@ class CategoriesPanel(QFrame):
             self.list_widget.setItemWidget(item, widget)
             if is_sel:
                 self.list_widget.setCurrentItem(item)
-                QTimer.singleShot(0, lambda it=item: self.list_widget.scrollToItem(it))
+                self.list_widget.scrollToItem(item)
 
     def select_category(self, name: str, emit_signal: bool = False):
-        """Sélectionne visuellement une catégorie par son nom dans la liste."""
+        """Sélectionne visuellement une catégorie standard par son nom."""
         self._current_selected_cat = name
+        self._current_selected_custom_list_id = None
         for i in range(self.list_widget.count()):
             it = self.list_widget.item(i)
             w = self.list_widget.itemWidget(it)
             if isinstance(w, CategoryItemWidget):
-                is_sel = (w.name.strip().lower() == name.strip().lower())
-                w.set_selected(is_sel)
-                if is_sel:
-                    self._active_category_widget = w
-                    self.list_widget.setCurrentItem(it)
-                    QTimer.singleShot(0, lambda item=it: self.list_widget.scrollToItem(item))
+                if not w.is_custom:
+                    is_sel = (w.name.strip().lower() == name.strip().lower())
+                    w.set_selected(is_sel)
+                    if is_sel:
+                        self._active_category_widget = w
+                        self.list_widget.setCurrentItem(it)
+                        self.list_widget.scrollToItem(it)
+                else:
+                    w.set_selected(False)
         if emit_signal:
             self.category_selected.emit(name)
+
+    def select_custom_list(self, list_id: int, emit_signal: bool = False):
+        """Sélectionne visuellement une liste de chaînes personnalisée par son ID."""
+        self._current_selected_custom_list_id = list_id
+        self._current_selected_cat = ""
+        selected_name = ""
+        for i in range(self.list_widget.count()):
+            it = self.list_widget.item(i)
+            w = self.list_widget.itemWidget(it)
+            if isinstance(w, CategoryItemWidget):
+                if w.is_custom and w.custom_list_id == list_id:
+                    w.set_selected(True)
+                    self._active_category_widget = w
+                    selected_name = w.name
+                    self.list_widget.setCurrentItem(it)
+                    self.list_widget.scrollToItem(it)
+                else:
+                    w.set_selected(False)
+        if emit_signal and selected_name:
+            self.custom_list_selected.emit(list_id, selected_name)
 
     def _select_category_by_name(self, name: str):
         self.select_category(name, emit_signal=True)
 
+    def _on_custom_list_clicked(self, list_id: int, name: str):
+        self.select_custom_list(list_id, emit_signal=False)
+        self.custom_list_selected.emit(list_id, name)
+
     def _on_item_clicked(self, item: QListWidgetItem):
         widget = self.list_widget.itemWidget(item)
         if isinstance(widget, CategoryItemWidget):
-            self._select_category_by_name(widget.name)
+            if widget.is_custom and widget.custom_list_id is not None:
+                self._on_custom_list_clicked(widget.custom_list_id, widget.name)
+            else:
+                self._select_category_by_name(widget.name)
 
     def _toggle_search_box(self):
         self.search_edit.setVisible(not self.search_edit.isVisible())

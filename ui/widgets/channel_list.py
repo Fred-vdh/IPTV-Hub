@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QListView, QLabel, QPushButton, QMenu, QAbstractItemView,
     QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QModelIndex, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QModelIndex, QSize, QEvent, QPoint
 from PyQt6.QtGui import QCursor
 
 from core.models import Channel, clean_category_display_name
@@ -19,6 +19,7 @@ from ui.widgets.channel_model import ChannelListModel
 from ui.widgets.channel_delegate import ChannelItemDelegate
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
 from core.i18n import tr, I18nManager
+from ui.dialogs.themed_input_dialog import ThemedInputDialog
 
 
 class ChannelListPanel(QFrame):
@@ -26,6 +27,7 @@ class ChannelListPanel(QFrame):
     favorite_toggled = pyqtSignal(int, bool)
     view_epg_requested = pyqtSignal(Channel)
     toggle_categories_requested = pyqtSignal()
+    custom_lists_changed = pyqtSignal()
 
     def __init__(self, db: Database, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -41,6 +43,8 @@ class ChannelListPanel(QFrame):
         self.all_channels: List[Channel] = []
         self._sort_mode = "default"  # "default", "name_asc", "name_desc"
         self.current_selected_category = "Toutes les chaînes"
+        self.current_custom_list_id: Optional[int] = None
+        self.current_custom_list_name: Optional[str] = None
 
         # Modèle & Délégué
         self.model = ChannelListModel(self)
@@ -127,6 +131,7 @@ class ChannelListPanel(QFrame):
         self.list_view.clicked.connect(self._on_single_clicked)
         self.list_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_view.customContextMenuRequested.connect(self._show_context_menu)
+        self.list_view.installEventFilter(self)
         channels_layout.addWidget(self.list_view)
 
     def set_categories_collapsed(self, collapsed: bool):
@@ -139,6 +144,8 @@ class ChannelListPanel(QFrame):
         self.current_playlist_id = playlist_id
         self.current_stream_type = stream_type
         self.favorites_only = favorites_only
+        self.current_custom_list_id = None
+        self.current_custom_list_name = None
         self.search_input.blockSignals(True)
         self.search_input.clear()
         self.search_input.blockSignals(False)
@@ -146,8 +153,25 @@ class ChannelListPanel(QFrame):
         self._apply_channel_filter()
 
     def set_category(self, category_name: str):
+        self.current_custom_list_id = None
+        self.current_custom_list_name = None
         self.current_selected_category = category_name
+        self.search_input.blockSignals(True)
+        self.search_input.clear()
+        self.search_input.blockSignals(False)
         self._apply_channel_filter()
+        self.list_view.scrollToTop()
+
+    def set_custom_list(self, list_id: int, list_name: str):
+        """Affiche les chaînes appartenant à une liste de chaînes personnalisée (ex: Salon HD, Van SD)."""
+        self.current_custom_list_id = list_id
+        self.current_custom_list_name = list_name
+        self.current_selected_category = list_name
+        self.search_input.blockSignals(True)
+        self.search_input.clear()
+        self.search_input.blockSignals(False)
+        self._apply_channel_filter()
+        self.list_view.scrollToTop()
 
     def set_search_query(self, query: str):
         self.search_input.blockSignals(True)
@@ -159,7 +183,17 @@ class ChannelListPanel(QFrame):
         search_query = self.search_input.text().strip()
         is_series = (self.current_stream_type == "series")
 
-        if is_series or self.current_stream_type in ("movie", "vod"):
+        if self.current_custom_list_id is not None:
+            # Affichage d'une liste de chaînes personnalisée
+            channels = self.db.get_channels_for_custom_list(
+                list_id=self.current_custom_list_id,
+                playlist_id=self.current_playlist_id,
+                search_query=search_query if search_query else None,
+                order_by=self._sort_mode,
+                limit=50000
+            )
+            title_text = f"📋 {self.current_custom_list_name}"
+        elif is_series or self.current_stream_type in ("movie", "vod"):
             # Pour les séries et films : recherche globale sur tout le catalogue dès 3 caractères, limitée à 40
             if len(search_query) >= 3:
                 group = None
@@ -171,22 +205,33 @@ class ChannelListPanel(QFrame):
                 query_to_use = None
                 limit_val = 50000
                 title_text = self.current_selected_category or ("Séries" if is_series else "Films")
+
+            channels = self.db.get_channels(
+                playlist_id=self.current_playlist_id,
+                group_title=group,
+                search_query=query_to_use,
+                favorites_only=self.favorites_only,
+                stream_type=self.current_stream_type,
+                only_enabled=True,
+                order_by=self._sort_mode,
+                limit=limit_val
+            )
         else:
             group = self.current_selected_category if self.current_selected_category else None
             query_to_use = search_query if search_query else None
             limit_val = 50000
             title_text = self.current_selected_category or ("Favoris" if self.favorites_only else "Chaînes")
 
-        channels = self.db.get_channels(
-            playlist_id=self.current_playlist_id,
-            group_title=group,
-            search_query=query_to_use,
-            favorites_only=self.favorites_only,
-            stream_type=self.current_stream_type,
-            only_enabled=True,
-            order_by=self._sort_mode,
-            limit=limit_val
-        )
+            channels = self.db.get_channels(
+                playlist_id=self.current_playlist_id,
+                group_title=group,
+                search_query=query_to_use,
+                favorites_only=self.favorites_only,
+                stream_type=self.current_stream_type,
+                only_enabled=True,
+                order_by=self._sort_mode,
+                limit=limit_val
+            )
 
         epg_map = self.db.get_current_programs_map()
 
@@ -219,7 +264,7 @@ class ChannelListPanel(QFrame):
             if index.isValid():
                 self.list_view.setCurrentIndex(index)
                 hint = QAbstractItemView.ScrollHint.PositionAtTop if scroll_to_top else QAbstractItemView.ScrollHint.PositionAtCenter
-                QTimer.singleShot(0, lambda idx=index, h=hint: self.list_view.scrollTo(idx, h))
+                self.list_view.scrollTo(index, hint)
 
     def _perform_search(self):
         self._apply_channel_filter()
@@ -271,7 +316,7 @@ class ChannelListPanel(QFrame):
     def _on_single_clicked(self, index: QModelIndex):
         channel = self.model.get_channel(index.row())
         if channel:
-            QTimer.singleShot(0, lambda idx=index: self.list_view.scrollTo(idx, QAbstractItemView.ScrollHint.PositionAtTop))
+            self.list_view.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtTop)
             self.channel_selected.emit(channel)
 
     def _on_fav_toggled(self, channel_id: int, is_fav: bool):
@@ -281,16 +326,68 @@ class ChannelListPanel(QFrame):
     def _on_image_loaded(self, url: str):
         self.model.update_for_logo(url)
 
+    def eventFilter(self, watched, event):
+        if watched == self.list_view and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Menu, Qt.Key.Key_M, Qt.Key.Key_Context1):
+                idx = self.list_view.currentIndex()
+                if idx.isValid():
+                    rect = self.list_view.visualRect(idx)
+                    self._show_context_menu_at_index(idx, rect.center())
+                    return True
+        return super().eventFilter(watched, event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Menu, Qt.Key.Key_M, Qt.Key.Key_Context1):
+            idx = self.list_view.currentIndex()
+            if idx.isValid():
+                rect = self.list_view.visualRect(idx)
+                self._show_context_menu_at_index(idx, rect.center())
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
     def _show_context_menu(self, pos):
         index = self.list_view.indexAt(pos)
         if not index.isValid():
             return
+        self._show_context_menu_at_index(index, pos)
 
+    def _show_context_menu_at_index(self, index: QModelIndex, pos: QPoint):
         channel = self.model.get_channel(index.row())
         if not channel:
             return
 
         menu = QMenu(self)
+
+        # Si on est dans une liste personnalisée : option directe pour retirer
+        if self.current_custom_list_id is not None:
+            act_rem = menu.addAction(
+                get_icon("delete", color="#f87171"),
+                f"{tr('Retirer de')} \"{self.current_custom_list_name}\""
+            )
+            act_rem.triggered.connect(lambda: self._remove_channel_from_current_custom_list(channel))
+            menu.addSeparator()
+
+        # Sous-menu des listes personnalisées
+        custom_menu = menu.addMenu(get_icon("playlist_play", color="#38bdf8"), tr("Listes personnalisées"))
+        custom_lists = self.db.get_custom_channel_lists()
+        channel_list_ids = self.db.get_channel_custom_list_ids(channel)
+
+        for cl in custom_lists:
+            act_l = custom_menu.addAction(cl["name"])
+            act_l.setCheckable(True)
+            is_in = (cl["id"] in channel_list_ids)
+            act_l.setChecked(is_in)
+            act_l.triggered.connect(lambda checked, lid=cl["id"]: self._toggle_channel_in_custom_list(lid, channel, checked))
+
+        if custom_lists:
+            custom_menu.addSeparator()
+
+        act_new_list = custom_menu.addAction(get_icon("add", color="#38bdf8"), tr("➕ Nouvelle liste..."))
+        act_new_list.triggered.connect(lambda: self._create_custom_list_with_channel(channel))
+
+        menu.addSeparator()
+
         fav_text = tr("Retirer des favoris") if channel.is_favorite else tr("Ajouter aux favoris")
         fav_icon = get_icon("favorite_border" if channel.is_favorite else "favorite", color="#f43f5e")
         act_fav = menu.addAction(fav_icon, fav_text)
@@ -299,7 +396,36 @@ class ChannelListPanel(QFrame):
         act_epg = menu.addAction(get_icon("calendar_today", color="#818cf8"), tr("Guide des programmes (EPG)"))
         act_epg.triggered.connect(lambda: self.view_epg_requested.emit(channel))
 
-        menu.exec(QCursor.pos())
+        global_pos = self.list_view.viewport().mapToGlobal(pos)
+        menu.exec(global_pos)
+
+    def _remove_channel_from_current_custom_list(self, channel: Channel):
+        if self.current_custom_list_id is not None:
+            self.db.remove_channel_from_custom_list(self.current_custom_list_id, channel)
+            self._apply_channel_filter()
+            self.custom_lists_changed.emit()
+
+    def _toggle_channel_in_custom_list(self, list_id: int, channel: Channel, checked: bool):
+        if checked:
+            self.db.add_channel_to_custom_list(list_id, channel)
+        else:
+            self.db.remove_channel_from_custom_list(list_id, channel)
+        if self.current_custom_list_id == list_id:
+            self._apply_channel_filter()
+        self.custom_lists_changed.emit()
+
+    def _create_custom_list_with_channel(self, channel: Channel):
+        name, ok = ThemedInputDialog.get_text(
+            self,
+            title=tr("Nouvelle liste personnalisée"),
+            label=tr("Nom de la liste (ex: Salon HD, Van SD) :"),
+            placeholder=tr("ex: Salon HD"),
+            icon_name="playlist_add"
+        )
+        if ok and name and name.strip():
+            list_id = self.db.create_custom_channel_list(name.strip())
+            self.db.add_channel_to_custom_list(list_id, channel)
+            self.custom_lists_changed.emit()
 
     def retranslate_ui(self, *args):
         """Met à jour les infobulles, placeholders et titres de ChannelListPanel."""

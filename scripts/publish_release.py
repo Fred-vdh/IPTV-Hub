@@ -37,28 +37,34 @@ def main():
         'User-Agent': 'IPTV-Hub-Release-Script'
     }
 
-    # 2. Création de la Release v2.1.6
-    release_body = """## 🚀 IPTV Hub v2.1.6 - Animation de chargement épurée et détection proactive de gel de flux
+    # 2. Création de la Release v2.2.2
+    release_body = """## 🚀 IPTV Hub v2.2.2 - Listes personnalisées, synchronisation QR et confort de lecture
 
-Bienvenue dans la version **2.1.6** d'**IPTV Hub**, le lecteur multimédia IPTV & VOD moderne et réactif propulsé nativement par PyQt6 et libmpv !
+Bienvenue dans la version **2.2.2** d'**IPTV Hub**, le lecteur multimédia IPTV & VOD moderne et réactif propulsé nativement par PyQt6 et libmpv !
 
 ---
 
 ### ✨ Nouveautés & Améliorations de cette version :
 
-1. **Animation vectorielle de chargement originale & épurée** :
-   - Pastille circulaire en verre fumé sombre (`rgba(15, 23, 42, 0.88)`) avec double arc orbital rotatif à lueur électrique et pulsation d'ondes radio IPTV au centre.
-   - Rendu 100% vectoriel avec anticrénelage (`QPainter`), centré et parfaitement intégré au thème sombre de l'application.
-   - Épuration visuelle : suppression des textes superflus pour une immersion vidéo maximale.
+1. **Listes de chaînes personnalisées** :
+   - Créez et gérez vos bouquets de chaînes sur-mesure (ex: *Salon HD*, *Van SD*, *Sport*, *Enfants*).
+   - Intégration ergonomique dans la fenêtre de gestion et de filtrage des catégories (réservée au direct).
+   - Tri naturel automatique respectant l'ordre TNT et de la playlist d'origine.
+   - Possibilité de renommer et supprimer vos listes personnalisées en un clic.
 
-2. **Temporisation intelligente de déclenchement (1,5 seconde)** :
-   - Au lancement d'un flux ou lors d'un micro-temps de chargement normal (< 1,5s), l'animation ne s'affiche pas pour éviter tout flash ou clignotement inutile.
-   - L'animation n'apparaît que si le chargement ou le ralentissement dépasse 1,5 seconde.
+2. **Synchronisation locale par QR Code & Auto-sync** :
+   - Partagez vos listes, favoris, historique et listes personnalisées entre appareils en scannant un QR code sur votre réseau local.
+   - Serveur de synchronisation léger intégré et mécanisme d'auto-synchronisation.
 
-3. **Détection proactive de gel de flux (Stall Detection)** :
-   - Surveillance continue de l'avancement des frames et écoute native de `paused-for-cache` de libmpv.
-   - Reprise instantanée et fluide dès réception de nouvelles données.
-   - Bascule automatique vers le message d'erreur (*Flux indisponible*) si le gel persiste au-delà de 12 secondes.
+3. **Confort de visionnage & Séries** :
+   - **Détection des génériques (IntroDB)** : Bouton discret permettant de sauter l'intro en un clic ou de manière automatique.
+   - **Enchaînement automatique** (*Auto-Play*) de l'épisode suivant avec overlay interactif.
+   - Amélioration de la gestion des sous-titres et des flux audio multilingues.
+
+4. **Corrections & Optimisations d'interface** :
+   - Exclusion stricte des listes personnalisées lors du filtrage des films ou séries pour un affichage et chargement instantanés.
+   - Correction de la redirection *"Voir tout >"* au-dessus de *Reprendre la lecture* vers la section *Récemment regardé*.
+   - Palette de couleurs Slate Blue-Grey cohérente dans l'ensemble des boîtes de dialogue.
 
 ---
 
@@ -69,9 +75,9 @@ Bienvenue dans la version **2.1.6** d'**IPTV Hub**, le lecteur multimédia IPTV 
 """
 
     release_data = {
-        'tag_name': 'v2.1.6',
+        'tag_name': 'v2.2.2',
         'target_commitish': 'main',
-        'name': 'IPTV Hub v2.1.6',
+        'name': 'IPTV Hub v2.2.2',
         'body': release_body,
         'draft': False,
         'prerelease': False
@@ -92,7 +98,7 @@ Bienvenue dans la version **2.1.6** d'**IPTV Hub**, le lecteur multimédia IPTV 
         print(f"Erreur API GitHub lors de la création de la release : {err_msg}")
         # Si la release existe déjà pour ce tag, tenter de la récupérer
         req_get = urllib.request.Request(
-            f"https://api.github.com/repos/{repo}/releases/tags/v2.1.6",
+            f"https://api.github.com/repos/{repo}/releases/tags/v2.2.2",
             headers=headers
         )
         with urllib.request.urlopen(req_get) as resp_get:
@@ -128,7 +134,7 @@ Bienvenue dans la version **2.1.6** d'**IPTV Hub**, le lecteur multimédia IPTV 
                 headers=headers,
                 method='DELETE'
             )
-            with urllib.request.urlopen(del_req) as del_resp:
+            with urllib.request.urlopen(del_req):
                 pass
 
         size_mb = file_path.stat().st_size / (1024 * 1024)

@@ -536,6 +536,63 @@ QToolTip {
     padding: 5px 10px;
     border-radius: 6px;
 }
+
+/* =========================================================================
+   BOÎTES DE DIALOGUE GÉNÉRIQUES (QInputDialog, QMessageBox, QDialogButtonBox)
+   ========================================================================= */
+QInputDialog, QMessageBox {
+    background-color: #1b2232;
+    border: 1px solid #33415c;
+    border-radius: 12px;
+}
+
+QInputDialog QLabel, QMessageBox QLabel {
+    color: #f1f5f9;
+    font-size: 13px;
+    background-color: transparent;
+}
+
+QInputDialog QLineEdit {
+    background-color: #222b3d;
+    border: 1px solid #33415c;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #ffffff;
+    font-size: 13px;
+}
+
+QInputDialog QLineEdit:focus {
+    border: 1px solid #38bdf8;
+    background-color: #263147;
+}
+
+QDialogButtonBox QPushButton, QInputDialog QPushButton, QMessageBox QPushButton {
+    background-color: #222b3d;
+    border: 1px solid #33415c;
+    border-radius: 8px;
+    padding: 8px 20px;
+    color: #e2e8f0;
+    font-size: 13px;
+    font-weight: 600;
+    min-width: 80px;
+}
+
+QDialogButtonBox QPushButton:hover, QInputDialog QPushButton:hover, QMessageBox QPushButton:hover {
+    background-color: #2e3c56;
+    border-color: #475569;
+    color: #ffffff;
+}
+
+QDialogButtonBox QPushButton:default, QInputDialog QPushButton:default {
+    background-color: #38bdf8;
+    border: none;
+    color: #0f172a;
+    font-weight: 700;
+}
+
+QDialogButtonBox QPushButton:default:hover, QInputDialog QPushButton:default:hover {
+    background-color: #0ea5e9;
+}
 """
 
 

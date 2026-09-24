@@ -209,6 +209,7 @@ class TestAutoPlayNextEpisode(unittest.TestCase):
         ctrl = PlayerController.__new__(PlayerController)
         ctrl._eof_reported = True
         ctrl._is_vod = True
+        ctrl._stream_has_started = True
         ctrl._current_url = "http://test/video.mp4"
         ctrl.playback_finished = MagicMock()
 
@@ -225,6 +226,52 @@ class TestAutoPlayNextEpisode(unittest.TestCase):
         ctrl._player = None
         ctrl.seek(10.0)
         self.assertFalse(ctrl._eof_reported)
+
+    def test_early_stop_does_not_mark_episode_completed(self):
+        """Vérifie qu'un arrêt prématuré ou un faux EOF n'enregistre PAS l'épisode comme vu à 100%."""
+        from ui.main_window import MainWindow
+
+        win = MainWindow.__new__(MainWindow)
+        QMainWindow.__init__(win)
+        win.db = self.db
+        win.settings = AppSettings(auto_play_next_episode=True)
+        win.current_channel = Channel(id=50, name='Strange New Worlds S04E08', stream_type='series', stream_url='http://test/749996.mkv')
+        win._current_playback_pos = 15.0  # 15 secondes seulement
+        win._current_playback_dur = 3800.0  # 63 minutes
+        win._series_episodes = [
+            Channel(id=50, name='Strange New Worlds S04E08', stream_type='series', stream_url='http://test/749996.mkv')
+        ]
+        win._current_series_idx = 0
+        win._save_current_playback_progress = MagicMock()
+        win._play_next_series_episode = MagicMock()
+
+        MainWindow._on_playback_finished(win)
+
+        # Doit avoir sauvegardé la progression courante réelle sans forcer 100% ni enchaîner
+        win._save_current_playback_progress.assert_called_once()
+        win._play_next_series_episode.assert_not_called()
+
+        prog_map = self.db.get_all_playback_progress_map()
+        self.assertNotIn('http://test/749996.mkv', prog_map)
+
+    def test_clear_playback_progress_with_episode_id_and_extension_variants(self):
+        """Vérifie que clear_playback_progress nettoie toutes les variantes (.mkv, .mp4) associées à un épisode."""
+        self.db.save_playback_progress(
+            channel_id=100,
+            stream_url="http://test/series/user/pass/749996.mkv",
+            channel_name="Star Trek S04E08",
+            position=3800.0,
+            duration=3800.0
+        )
+
+        prog_map = self.db.get_all_playback_progress_map()
+        self.assertIn("http://test/series/user/pass/749996.mkv", prog_map)
+
+        # Supprimer en passant l'URL .mp4 ou l'episode_id 749996
+        self.db.clear_playback_progress(stream_url="http://test/series/user/pass/749996.mp4", episode_id="749996")
+
+        prog_map_after = self.db.get_all_playback_progress_map()
+        self.assertNotIn("http://test/series/user/pass/749996.mkv", prog_map_after)
 
 
 if __name__ == '__main__':

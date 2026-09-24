@@ -132,6 +132,16 @@ class TestDashboardEnhancements(unittest.TestCase):
         self.assertIn("Épisode suivant disponible", banner.status_label.text())
         self.assertEqual(banner.progress_bar_fill.width(), 0)
 
+    def test_sec_continue_see_all_routes_to_history(self):
+        """Vérifie que 'Voir tout' sur 'Reprendre la lecture' redirige bien vers 'history' (Récemment regardé)."""
+        view = DashboardView(self.db)
+        emitted_sections = []
+        view.navigate_section_requested.connect(emitted_sections.append)
+
+        # Clic sur le bouton 'Voir tout >' de sec_continue
+        view.sec_continue.see_all_btn.click()
+        self.assertEqual(emitted_sections, ["history"])
+
 
 if __name__ == '__main__':
     unittest.main()

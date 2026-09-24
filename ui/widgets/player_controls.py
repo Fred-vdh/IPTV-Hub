@@ -170,6 +170,12 @@ class PlayerControls(QWidget):
         self.bottom_bar.hide()
         self.setCursor(Qt.CursorShape.BlankCursor)
 
+    def are_bars_visible(self) -> bool:
+        """Indique si au moins une des barres de contrôle (haut ou bas) est actuellement visible."""
+        top_vis = hasattr(self, "top_bar") and self.top_bar.isVisible()
+        bot_vis = hasattr(self, "bottom_bar") and self.bottom_bar.isVisible()
+        return bool(top_vis or bot_vis)
+
     def hide(self):
         self.top_bar.hide()
         self.bottom_bar.hide()
@@ -915,9 +921,10 @@ class PlayerControls(QWidget):
         else:
             for t in audio_tracks:
                 tid = t.get("id", 1)
-                lang = t.get("lang", "Inconnu")
-                title = t.get("title", f"Piste {tid}")
-                act = menu.addAction(f"{title} ({lang})")
+                lang = (t.get("lang") or "").strip()
+                title = (t.get("title") or "").strip() or f"Piste {tid}"
+                display_name = f"{title} ({lang})" if (lang and lang.lower() != "inconnu") else title
+                act = menu.addAction(display_name)
                 act.setCheckable(True)
                 act.setChecked(bool(t.get("selected")))
                 act.triggered.connect(lambda checked, track_id=tid: self.audio_track_selected.emit(track_id))
@@ -936,9 +943,10 @@ class PlayerControls(QWidget):
 
         for t in sub_tracks:
             tid = t.get("id", 1)
-            lang = t.get("lang", "Inconnu")
-            title = t.get("title", f"Sous-titre {tid}")
-            act = menu.addAction(f"{title} ({lang})")
+            lang = (t.get("lang") or "").strip()
+            title = (t.get("title") or "").strip() or f"Sous-titre {tid}"
+            display_name = f"{title} ({lang})" if (lang and lang.lower() != "inconnu") else title
+            act = menu.addAction(display_name)
             act.setCheckable(True)
             act.setChecked(bool(t.get("selected")))
             act.triggered.connect(lambda checked, track_id=tid: self.subtitle_track_selected.emit(track_id))

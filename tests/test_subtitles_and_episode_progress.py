@@ -81,6 +81,77 @@ class TestSubtitlesAndEpisodeProgress(unittest.TestCase):
         controller._auto_select_preferred_subtitles(tracks)
         self.assertEqual(mock_mpv["sid"], "no")
 
+    def test_forced_subtitles_persistence_across_episodes(self):
+        """Vérifie que la sélection d'un sous-titre 'subforced' / forcé persiste entre les épisodes."""
+        controller = PlayerController(
+            preferred_audio_lang="eng",
+            preferred_subtitle_lang="off",
+            subtitles_enabled=False
+        )
+        mock_mpv = MockMpv()
+        controller._player = mock_mpv
+
+        # Épisode 1 : dialogue anglais, sous-titres complet et subforced français
+        ep1_tracks = [
+            {"type": "video", "id": 1},
+            {"type": "audio", "id": 1, "lang": "eng", "title": "English"},
+            {"type": "audio", "id": 2, "lang": "fra", "title": "French VF"},
+            {"type": "sub", "id": 1, "lang": "fra", "title": "French", "forced": False},
+            {"type": "sub", "id": 2, "lang": "fra", "title": "subforced", "forced": True},
+            {"type": "sub", "id": 3, "lang": "eng", "title": "English", "forced": False},
+        ]
+        mock_mpv["track-list"] = ep1_tracks
+
+        # L'utilisateur choisit la piste 2 (subforced français)
+        signal_received = []
+        controller.subtitle_preference_changed.connect(lambda lang, enabled: signal_received.append((lang, enabled)))
+        controller.set_subtitle_track(2)
+
+        self.assertTrue(controller._subtitles_enabled)
+        self.assertTrue(controller._preferred_subtitle_forced)
+        self.assertEqual(controller._preferred_subtitle_lang, "fra:forced")
+        self.assertEqual(signal_received, [("fra:forced", True)])
+        self.assertEqual(mock_mpv["sid"], 2)
+
+        # Vérifier que la liste synchronisée marque bien la piste 2 comme sélectionnée
+        synced_ep1 = controller._get_synchronized_track_list()
+        selected_ep1_sub = next((t for t in synced_ep1 if t.get("type") == "sub" and t.get("selected")), None)
+        self.assertIsNotNone(selected_ep1_sub)
+        self.assertEqual(selected_ep1_sub.get("id"), 2)
+
+        # Épisode 2 : nouveaux identifiants et libellés ("French (complet)" vs "French [Forced]")
+        ep2_tracks = [
+            {"type": "video", "id": 1},
+            {"type": "audio", "id": 1, "lang": "eng", "title": "English"},
+            {"type": "audio", "id": 2, "lang": "fra", "title": "French"},
+            {"type": "sub", "id": 10, "lang": "fra", "title": "French (complet)", "forced": False},
+            {"type": "sub", "id": 20, "lang": "fra", "title": "French [Forced]", "forced": True},
+            {"type": "sub", "id": 30, "lang": "eng", "title": "English"},
+        ]
+        mock_mpv["sid"] = "no"
+        mock_mpv["track-list"] = ep2_tracks
+
+        controller._auto_select_preferred_subtitles(ep2_tracks)
+        self.assertEqual(mock_mpv["sid"], 20, "La piste forcée (id 20) doit être priorisée sur la piste complète (id 10)")
+
+        synced_ep2 = controller._get_synchronized_track_list(ep2_tracks)
+        selected_ep2_sub = next((t for t in synced_ep2 if t.get("type") == "sub" and t.get("selected")), None)
+        self.assertIsNotNone(selected_ep2_sub)
+        self.assertEqual(selected_ep2_sub.get("id"), 20)
+
+        # Épisode 3 : piste nommée uniquement "subforced" avec code langue vide
+        ep3_tracks = [
+            {"type": "video", "id": 1},
+            {"type": "audio", "id": 1, "lang": "eng"},
+            {"type": "sub", "id": 5, "title": "French Full", "lang": "fra"},
+            {"type": "sub", "id": 6, "title": "subforced", "lang": ""},
+        ]
+        mock_mpv["sid"] = "no"
+        mock_mpv["track-list"] = ep3_tracks
+
+        controller._auto_select_preferred_subtitles(ep3_tracks)
+        self.assertEqual(mock_mpv["sid"], 6, "Le titre 'subforced' sans code langue doit être reconnu comme français forcé")
+
     def test_series_episode_progress_realtime_and_refresh(self):
         """Vérifie la mise à jour en temps réel et le rafraîchissement des cartes d'épisodes."""
         pl = Playlist(id=1, name="Test PL", playlist_type="xtream", server_url="http://s", username="u", password="p")

@@ -8,9 +8,9 @@ import json
 import dataclasses
 from pathlib import Path
 from contextlib import contextmanager
-from typing import List, Optional, Dict, Any, Tuple, Generator, Set
+from typing import List, Optional, Dict, Any, Tuple, Generator, Set, Union
 from datetime import datetime
-from core.models import Playlist, Channel, EPGProgram, WatchHistory, AppSettings
+from core.models import Playlist, Channel, EPGProgram, WatchHistory, AppSettings, IntroDBSegments
 
 import os
 import sys
@@ -151,7 +151,11 @@ class Database:
                 "account_status TEXT",
                 "exp_date TEXT",
                 "max_connections TEXT",
-                "active_cons TEXT"
+                "active_cons TEXT",
+                "last_sync_live TEXT",
+                "last_sync_vod TEXT",
+                "last_sync_series TEXT",
+                "last_sync_epg TEXT"
             ):
                 try:
                     cursor.execute(f"ALTER TABLE playlists ADD COLUMN {col_def};")
@@ -383,6 +387,76 @@ class Database:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_series_new_ep_active ON series_new_episode_flags(playlist_id, series_id, is_dismissed);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_series_new_ep_url ON series_new_episode_flags(stream_url);")
+
+            # Table de cache des segments IntroDB (génériques début/fin)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS introdb_segments (
+                    imdb_id TEXT NOT NULL,
+                    season INTEGER NOT NULL,
+                    episode INTEGER NOT NULL,
+                    intro_start REAL,
+                    intro_end REAL,
+                    outro_start REAL,
+                    outro_end REAL,
+                    confidence REAL,
+                    submission_count INTEGER DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (imdb_id, season, episode)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_introdb_lookup ON introdb_segments(imdb_id, season, episode);")
+
+            # Tables des listes de chaînes personnalisées (ex: Salon HD, Van SD)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS custom_channel_lists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    created_at TEXT,
+                    sort_order INTEGER DEFAULT 0
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ccl_name ON custom_channel_lists(name);")
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS custom_channel_list_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    list_id INTEGER NOT NULL,
+                    channel_name TEXT NOT NULL,
+                    stream_url TEXT,
+                    stream_id TEXT,
+                    stream_type TEXT DEFAULT 'live',
+                    logo_url TEXT,
+                    group_title TEXT,
+                    order_index INTEGER DEFAULT 0,
+                    added_at TEXT,
+                    FOREIGN KEY(list_id) REFERENCES custom_channel_lists(id) ON DELETE CASCADE,
+                    UNIQUE(list_id, channel_name, stream_type)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ccli_list_id ON custom_channel_list_items(list_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ccli_channel ON custom_channel_list_items(channel_name, stream_type);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ccli_stream_id ON custom_channel_list_items(stream_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ccli_stream_url ON custom_channel_list_items(stream_url);")
+
+            # Aligner l'ordre des éléments des listes personnalisées sur l'ordre naturel des chaînes si disponible
+            try:
+                cursor.execute("""
+                    UPDATE custom_channel_list_items
+                    SET order_index = (
+                        SELECT c.id FROM channels c
+                        WHERE c.stream_id = custom_channel_list_items.stream_id
+                          AND c.stream_type = custom_channel_list_items.stream_type
+                        LIMIT 1
+                    )
+                    WHERE EXISTS (
+                        SELECT 1 FROM channels c
+                        WHERE c.stream_id = custom_channel_list_items.stream_id
+                          AND c.stream_type = custom_channel_list_items.stream_type
+                    )
+                """)
+            except Exception:
+                pass
+
             conn.commit()
 
     # ------------------ PLAYLISTS ------------------
@@ -394,13 +468,15 @@ class Database:
                 INSERT INTO playlists (
                     name, url_or_path, playlist_type, server_url, username, password,
                     epg_url, created_at, updated_at, channel_count,
-                    account_status, exp_date, max_connections, active_cons
+                    account_status, exp_date, max_connections, active_cons,
+                    last_sync_live, last_sync_vod, last_sync_series, last_sync_epg
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 p.name, p.url_or_path, p.playlist_type, p.server_url, p.username, p.password,
                 p.epg_url, p.created_at, p.updated_at, p.channel_count,
-                p.account_status, p.exp_date, p.max_connections, p.active_cons
+                p.account_status, p.exp_date, p.max_connections, p.active_cons,
+                p.last_sync_live, p.last_sync_vod, p.last_sync_series, p.last_sync_epg
             ))
             conn.commit()
             return cursor.lastrowid or 0
@@ -428,13 +504,51 @@ class Database:
             cursor.execute("""
                 UPDATE playlists
                 SET name=?, url_or_path=?, playlist_type=?, server_url=?, username=?, password=?, epg_url=?,
-                    updated_at=?, channel_count=?, account_status=?, exp_date=?, max_connections=?, active_cons=?
+                    updated_at=?, channel_count=?, account_status=?, exp_date=?, max_connections=?, active_cons=?,
+                    last_sync_live=?, last_sync_vod=?, last_sync_series=?, last_sync_epg=?
                 WHERE id=?
             """, (
                 p.name, p.url_or_path, p.playlist_type, p.server_url, p.username, p.password, p.epg_url,
-                p.updated_at, p.channel_count, p.account_status, p.exp_date, p.max_connections, p.active_cons, p.id
+                p.updated_at, p.channel_count, p.account_status, p.exp_date, p.max_connections, p.active_cons,
+                p.last_sync_live, p.last_sync_vod, p.last_sync_series, p.last_sync_epg, p.id
             ))
             conn.commit()
+
+    def update_playlist_sync_timestamp(self, playlist_id: int, sync_type: str, timestamp: Optional[str] = None):
+        """Met à jour l'horodatage de synchronisation pour un type donné (live, vod, series, epg)."""
+        col_map = {
+            "live": "last_sync_live",
+            "vod": "last_sync_vod",
+            "series": "last_sync_series",
+            "epg": "last_sync_epg"
+        }
+        col = col_map.get(sync_type)
+        if not col:
+            return
+        ts = timestamp or datetime.now().isoformat()
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE playlists SET {col}=?, updated_at=? WHERE id=?", (ts, ts, playlist_id))
+            conn.commit()
+
+    def get_playlist_sync_timestamps(self, playlist_id: int) -> Dict[str, Optional[str]]:
+        """Retourne les horodatages de synchronisation (live, vod, series, epg) d'une playlist."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT last_sync_live, last_sync_vod, last_sync_series, last_sync_epg, updated_at
+                FROM playlists WHERE id=?
+            """, (playlist_id,))
+            row = cursor.fetchone()
+            if not row:
+                return {"live": None, "vod": None, "series": None, "epg": None, "updated_at": None}
+            return {
+                "live": row["last_sync_live"],
+                "vod": row["last_sync_vod"],
+                "series": row["last_sync_series"],
+                "epg": row["last_sync_epg"],
+                "updated_at": row["updated_at"]
+            }
 
     def update_playlist_account_info(
         self,
@@ -487,15 +601,21 @@ class Database:
 
     # ------------------ CHANNELS ------------------
 
-    def save_channels_batch(self, playlist_id: int, channels: List[Channel], replace: bool = True):
+    def save_channels_batch(self, playlist_id: int, channels: List[Channel], replace: bool = True, stream_type: Optional[str] = None):
         with self.get_connection() as conn:
             cursor = conn.cursor()
             # 1. Préserver favoris et filtres de chaînes désactivées avant suppression
             if replace:
-                cursor.execute(
-                    "SELECT name, stream_url, stream_id, stream_type, logo_url, group_title, favorite_added_at FROM channels WHERE playlist_id=? AND is_favorite=1",
-                    (playlist_id,)
-                )
+                if stream_type:
+                    cursor.execute(
+                        "SELECT name, stream_url, stream_id, stream_type, logo_url, group_title, favorite_added_at FROM channels WHERE playlist_id=? AND stream_type=? AND is_favorite=1",
+                        (playlist_id, stream_type)
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT name, stream_url, stream_id, stream_type, logo_url, group_title, favorite_added_at FROM channels WHERE playlist_id=? AND is_favorite=1",
+                        (playlist_id,)
+                    )
                 for r in cursor.fetchall():
                     cursor.execute("""
                         INSERT INTO persistent_favorites (name, stream_url, stream_id, stream_type, logo_url, group_title, favorite_added_at)
@@ -507,15 +627,26 @@ class Database:
                             favorite_added_at=excluded.favorite_added_at
                     """, (r["name"], r["stream_url"], r["stream_id"], r["stream_type"], r["logo_url"], r["group_title"], r["favorite_added_at"] or datetime.now().isoformat()))
 
-                cursor.execute("""
-                    SELECT c.name, c.group_title, c.stream_url, c.stream_id, c.stream_type, c.playlist_id 
-                    FROM channels c 
-                    WHERE c.playlist_id=? AND c.is_enabled=0
-                      AND c.group_title NOT IN (
-                          SELECT group_title FROM persistent_disabled_groups 
-                          WHERE stream_type = c.stream_type AND playlist_id = c.playlist_id
-                      )
-                """, (playlist_id,))
+                if stream_type:
+                    cursor.execute("""
+                        SELECT c.name, c.group_title, c.stream_url, c.stream_id, c.stream_type, c.playlist_id 
+                        FROM channels c 
+                        WHERE c.playlist_id=? AND c.stream_type=? AND c.is_enabled=0
+                          AND c.group_title NOT IN (
+                              SELECT group_title FROM persistent_disabled_groups 
+                              WHERE stream_type = c.stream_type AND playlist_id = c.playlist_id
+                          )
+                    """, (playlist_id, stream_type))
+                else:
+                    cursor.execute("""
+                        SELECT c.name, c.group_title, c.stream_url, c.stream_id, c.stream_type, c.playlist_id 
+                        FROM channels c 
+                        WHERE c.playlist_id=? AND c.is_enabled=0
+                          AND c.group_title NOT IN (
+                              SELECT group_title FROM persistent_disabled_groups 
+                              WHERE stream_type = c.stream_type AND playlist_id = c.playlist_id
+                          )
+                    """, (playlist_id,))
                 for r in cursor.fetchall():
                     cursor.execute("""
                         INSERT INTO persistent_disabled_channels (name, group_title, stream_url, stream_id, stream_type, playlist_id)
@@ -527,10 +658,16 @@ class Database:
                     """, (r["name"], r["group_title"], r["stream_url"], r["stream_id"], r["stream_type"], r["playlist_id"]))
 
                 # 1.ter Charger les dates d'ajout existantes pour ne pas les perdre si non fournies
-                cursor.execute(
-                    "SELECT stream_url, stream_id, stream_type, name, added_at, is_favorite FROM channels WHERE playlist_id=? AND added_at IS NOT NULL AND added_at != ''",
-                    (playlist_id,)
-                )
+                if stream_type:
+                    cursor.execute(
+                        "SELECT stream_url, stream_id, stream_type, name, added_at, is_favorite FROM channels WHERE playlist_id=? AND stream_type=? AND added_at IS NOT NULL AND added_at != ''",
+                        (playlist_id, stream_type)
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT stream_url, stream_id, stream_type, name, added_at, is_favorite FROM channels WHERE playlist_id=? AND added_at IS NOT NULL AND added_at != ''",
+                        (playlist_id,)
+                    )
                 existing_added = {}
                 existing_series = {}
                 for r in cursor.fetchall():
@@ -543,7 +680,10 @@ class Database:
                     if r["stream_type"] == "series" and r["stream_id"]:
                         existing_series[str(r["stream_id"])] = (r["added_at"] or "", bool(r["is_favorite"]))
 
-                cursor.execute("DELETE FROM channels WHERE playlist_id=?", (playlist_id,))
+                if stream_type:
+                    cursor.execute("DELETE FROM channels WHERE playlist_id=? AND stream_type=?", (playlist_id, stream_type))
+                else:
+                    cursor.execute("DELETE FROM channels WHERE playlist_id=?", (playlist_id,))
             else:
                 existing_added = {}
                 existing_series = {}
@@ -582,6 +722,7 @@ class Database:
             pers_dis_groups = {(r["group_title"], r["stream_type"]) for r in cursor.fetchall()}
 
             params = []
+            matched_pers_fav_names = set()
             for c in channels:
                 is_fav = bool(c.is_favorite)
                 fav_date = None
@@ -589,12 +730,17 @@ class Database:
                     if c.stream_url and c.stream_url in pers_favs_by_url:
                         is_fav = True
                         fav_date = pers_favs_by_url[c.stream_url]
+                        if c.name:
+                            matched_pers_fav_names.add((c.name, c.stream_type))
                     elif c.stream_id and (str(c.stream_id), c.stream_type) in pers_favs_by_id:
                         is_fav = True
                         fav_date = pers_favs_by_id[(str(c.stream_id), c.stream_type)]
-                    elif (c.name, c.stream_type) in pers_favs_by_name:
+                        if c.name:
+                            matched_pers_fav_names.add((c.name, c.stream_type))
+                    elif (c.name, c.stream_type) in pers_favs_by_name and (c.name, c.stream_type) not in matched_pers_fav_names:
                         is_fav = True
                         fav_date = pers_favs_by_name[(c.name, c.stream_type)]
+                        matched_pers_fav_names.add((c.name, c.stream_type))
                 else:
                     fav_date = datetime.now().isoformat()
 
@@ -1852,15 +1998,15 @@ class Database:
                 effective_dur = 3600.0
 
             # Si visionné à >= 90% ou forcé à completion, on enregistre à 100%
-            if position >= effective_dur * 0.90 or (effective_dur - position) <= 60:
+            if position >= effective_dur * 0.90 or (effective_dur >= 180 and position >= 120 and (effective_dur - position) <= 60):
                 saved_pos = effective_dur
             else:
                 saved_pos = position
 
             # Si l'élément était déjà marqué comme terminé (100%), une lecture brève ou fugitive (< 90%)
             # ne doit pas écraser ou dévalider ce statut terminé (seul un clic explicite sur la coche le fait)
-            if existing and existing_dur > 0 and (existing_pos >= existing_dur * 0.90 or (existing_dur - existing_pos) <= 60):
-                if saved_pos < effective_dur * 0.90 and (effective_dur - saved_pos) > 60:
+            if existing and existing_dur > 0 and (existing_pos >= existing_dur * 0.90 or (existing_dur >= 180 and existing_pos >= 120 and (existing_dur - existing_pos) <= 60)):
+                if saved_pos < effective_dur * 0.90 and not (effective_dur >= 180 and saved_pos >= 120 and (effective_dur - saved_pos) <= 60):
                     return
 
             if saved_pos >= 5.0 or (effective_dur > 0 and saved_pos >= effective_dur * 0.90):
@@ -1901,11 +2047,30 @@ class Database:
                     return (pos, dur)
             return None
 
-    def clear_playback_progress(self, channel_id: Optional[int] = None, stream_url: Optional[str] = None):
+    def clear_playback_progress(self, channel_id: Optional[int] = None, stream_url: Optional[str] = None, episode_id: Optional[Union[int, str]] = None):
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            if episode_id:
+                ep_id_str = str(episode_id).strip()
+                if ep_id_str:
+                    cursor.execute(
+                        "DELETE FROM playback_progress WHERE stream_url LIKE ? OR stream_url LIKE ? OR channel_id = ?",
+                        (f"%/{ep_id_str}.%", f"%/{ep_id_str}", int(ep_id_str) if ep_id_str.isdigit() else -1)
+                    )
             if stream_url:
                 cursor.execute("DELETE FROM playback_progress WHERE stream_url = ?", (stream_url,))
+                # Si l'URL se termine par un identifiant d'épisode avec extension (ex: /749996.mkv ou /749996.mp4),
+                # supprimer aussi toute variante d'extension pour cet épisode
+                parts = stream_url.rstrip("/").split("/")
+                if parts:
+                    last_part = parts[-1]
+                    if "." in last_part:
+                        base_id = last_part.rsplit(".", 1)[0]
+                        if base_id.isdigit():
+                            cursor.execute(
+                                "DELETE FROM playback_progress WHERE stream_url LIKE ? OR stream_url LIKE ?",
+                                (f"%/{base_id}.%", f"%/{base_id}")
+                            )
             elif channel_id and channel_id > 0:
                 cursor.execute("DELETE FROM playback_progress WHERE channel_id = ?", (channel_id,))
             conn.commit()
@@ -1981,8 +2146,34 @@ class Database:
                 settings.theme = data["theme"]
             if "auto_refresh_epg" in data:
                 settings.auto_refresh_epg = data["auto_refresh_epg"].lower() == "true"
-            if "epg_refresh_hours" in data:
-                settings.epg_refresh_hours = int(data["epg_refresh_hours"])
+            if "epg_refresh_days" in data:
+                settings.epg_refresh_days = int(data["epg_refresh_days"])
+            elif "epg_refresh_hours" in data:
+                settings.epg_refresh_days = max(1, round(int(data["epg_refresh_hours"]) / 24))
+
+            if "auto_sync_live" in data:
+                settings.auto_sync_live = data["auto_sync_live"].lower() == "true"
+            if "sync_interval_live_days" in data:
+                settings.sync_interval_live_days = int(data["sync_interval_live_days"])
+            elif "sync_interval_live_hours" in data:
+                settings.sync_interval_live_days = max(1, round(int(data["sync_interval_live_hours"]) / 24))
+
+            if "auto_sync_vod" in data:
+                settings.auto_sync_vod = data["auto_sync_vod"].lower() == "true"
+            if "sync_interval_vod_days" in data:
+                settings.sync_interval_vod_days = int(data["sync_interval_vod_days"])
+            elif "sync_interval_vod_hours" in data:
+                settings.sync_interval_vod_days = max(1, round(int(data["sync_interval_vod_hours"]) / 24))
+
+            if "auto_sync_series" in data:
+                settings.auto_sync_series = data["auto_sync_series"].lower() == "true"
+            if "sync_interval_series_days" in data:
+                settings.sync_interval_series_days = int(data["sync_interval_series_days"])
+            elif "sync_interval_series_hours" in data:
+                settings.sync_interval_series_days = max(1, round(int(data["sync_interval_series_hours"]) / 24))
+
+            if "sync_on_startup" in data:
+                settings.sync_on_startup = data["sync_on_startup"].lower() == "true"
             if "cache_logos" in data:
                 settings.cache_logos = data["cache_logos"].lower() == "true"
             if "deinterlace" in data:
@@ -2029,6 +2220,10 @@ class Database:
                 settings.sync_last_timestamp = data["sync_last_timestamp"]
             if "auto_play_next_episode" in data:
                 settings.auto_play_next_episode = data["auto_play_next_episode"].lower() == "true"
+            if "introdb_intro_skip" in data:
+                settings.introdb_intro_skip = data["introdb_intro_skip"].lower() == "true"
+            if "introdb_outro_skip" in data:
+                settings.introdb_outro_skip = data["introdb_outro_skip"].lower() == "true"
             if "app_language" in data:
                 settings.app_language = data["app_language"]
             return settings
@@ -2044,7 +2239,18 @@ class Database:
                 "volume": str(settings.volume),
                 "theme": settings.theme,
                 "auto_refresh_epg": str(settings.auto_refresh_epg),
+                "epg_refresh_days": str(settings.epg_refresh_days),
                 "epg_refresh_hours": str(settings.epg_refresh_hours),
+                "auto_sync_live": str(settings.auto_sync_live),
+                "sync_interval_live_days": str(settings.sync_interval_live_days),
+                "sync_interval_live_hours": str(settings.sync_interval_live_hours),
+                "auto_sync_vod": str(settings.auto_sync_vod),
+                "sync_interval_vod_days": str(settings.sync_interval_vod_days),
+                "sync_interval_vod_hours": str(settings.sync_interval_vod_hours),
+                "auto_sync_series": str(settings.auto_sync_series),
+                "sync_interval_series_days": str(settings.sync_interval_series_days),
+                "sync_interval_series_hours": str(settings.sync_interval_series_hours),
+                "sync_on_startup": str(settings.sync_on_startup),
                 "cache_logos": str(settings.cache_logos),
                 "deinterlace": str(settings.deinterlace),
                 "preferred_audio_lang": settings.preferred_audio_lang,
@@ -2068,6 +2274,8 @@ class Database:
                 "sync_folder": settings.sync_folder,
                 "sync_last_timestamp": settings.sync_last_timestamp,
                 "auto_play_next_episode": str(settings.auto_play_next_episode),
+                "introdb_intro_skip": str(settings.introdb_intro_skip),
+                "introdb_outro_skip": str(settings.introdb_outro_skip),
                 "app_language": settings.app_language,
             }
             for k, v in data.items():
@@ -2216,7 +2424,7 @@ class Database:
             for r in rows:
                 pos = float(r["playback_position"] or 0.0)
                 dur = float(r["duration"] or 1.0)
-                ch_id = r["channel_id"]
+                ch_id = r["ch_id"] or r["channel_id"]
                 raw_name = r["channel_name"] or r["ch_name"] or "Vidéo"
                 series_name = r["ch_name"] or raw_name
                 stream_url = r["stream_url"] or ""
@@ -2700,4 +2908,338 @@ class Database:
     def dismiss_all_new_episodes_for_series(self, playlist_id: int, series_id: str) -> bool:
         """Acquitte tous les nouveaux épisodes pour une série."""
         return self.dismiss_new_episode(playlist_id=playlist_id, series_id=series_id)
+
+    # ------------------ INTRODB SEGMENTS ------------------
+
+    def get_introdb_segments(self, imdb_id: str, season: int, episode: int) -> Optional[IntroDBSegments]:
+        """Récupère les marqueurs IntroDB mis en cache localement."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT imdb_id, season, episode, intro_start, intro_end, outro_start, outro_end, confidence, submission_count, updated_at
+                FROM introdb_segments
+                WHERE imdb_id = ? AND season = ? AND episode = ?
+            """, (imdb_id, int(season), int(episode)))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return IntroDBSegments(
+                imdb_id=row["imdb_id"],
+                season=int(row["season"]),
+                episode=int(row["episode"]),
+                intro_start=row["intro_start"],
+                intro_end=row["intro_end"],
+                outro_start=row["outro_start"],
+                outro_end=row["outro_end"],
+                confidence=row["confidence"],
+                submission_count=row["submission_count"] or 0,
+                updated_at=row["updated_at"] or ""
+            )
+
+    def save_introdb_segments(self, s: IntroDBSegments):
+        """Enregistre ou met à jour les marqueurs IntroDB dans le cache local."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO introdb_segments (
+                    imdb_id, season, episode, intro_start, intro_end, outro_start, outro_end, confidence, submission_count, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                s.imdb_id, int(s.season), int(s.episode), s.intro_start, s.intro_end, s.outro_start, s.outro_end,
+                s.confidence, s.submission_count, s.updated_at or datetime.now().isoformat()
+            ))
+            conn.commit()
+
+    # ------------------ LISTES DE CHAÎNES PERSONNALISÉES ------------------
+
+    def create_custom_channel_list(self, name: str) -> int:
+        """Crée une nouvelle liste de chaînes personnalisée ou retourne l'ID si déjà existante."""
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Le nom de la liste ne peut pas être vide")
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM custom_channel_lists WHERE name = ?", (clean_name,))
+            row = cursor.fetchone()
+            if row:
+                return row["id"]
+            cursor.execute("""
+                INSERT INTO custom_channel_lists (name, created_at, sort_order)
+                VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM custom_channel_lists))
+            """, (clean_name, datetime.now().isoformat()))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_custom_channel_lists(self) -> List[Dict[str, Any]]:
+        """Retourne toutes les listes personnalisées avec leur nombre de chaînes."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT l.id, l.name, l.created_at, l.sort_order, COUNT(i.id) as item_count
+                FROM custom_channel_lists l
+                LEFT JOIN custom_channel_list_items i ON l.id = i.list_id
+                GROUP BY l.id
+                ORDER BY l.sort_order ASC, l.name COLLATE NOCASE ASC
+            """)
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_custom_channel_list_by_id(self, list_id: int) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT l.id, l.name, l.created_at, l.sort_order, COUNT(i.id) as item_count
+                FROM custom_channel_lists l
+                LEFT JOIN custom_channel_list_items i ON l.id = i.list_id
+                WHERE l.id = ?
+                GROUP BY l.id
+            """, (list_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def rename_custom_channel_list(self, list_id: int, new_name: str) -> bool:
+        """Renomme une liste de chaînes personnalisée."""
+        clean_name = new_name.strip()
+        if not clean_name:
+            return False
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute("UPDATE custom_channel_lists SET name = ? WHERE id = ?", (clean_name, list_id))
+                conn.commit()
+                return cursor.rowcount > 0
+            except sqlite3.IntegrityError:
+                return False
+
+    def delete_custom_channel_list(self, list_id: int) -> bool:
+        """Supprime une liste de chaînes personnalisée et ses éléments associés."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM custom_channel_list_items WHERE list_id = ?", (list_id,))
+            cursor.execute("DELETE FROM custom_channel_lists WHERE id = ?", (list_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def add_channel_to_custom_list(self, list_id: int, channel: Channel) -> bool:
+        """Ajoute une chaîne à une liste personnalisée."""
+        if not channel or not channel.name:
+            return False
+        if self.is_channel_in_custom_list(list_id, channel):
+            return True
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            order_val = channel.id if (channel.id is not None and channel.id > 0) else 0
+            if order_val == 0:
+                cursor.execute("SELECT COALESCE(MAX(order_index), -1) + 1 FROM custom_channel_list_items WHERE list_id = ?", (list_id,))
+                order_val = cursor.fetchone()[0]
+
+            cursor.execute("""
+                INSERT INTO custom_channel_list_items (
+                    list_id, channel_name, stream_url, stream_id, stream_type,
+                    logo_url, group_title, order_index, added_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                list_id,
+                channel.name,
+                channel.stream_url or "",
+                channel.stream_id or "",
+                channel.stream_type or "live",
+                channel.logo_url or "",
+                channel.group_title or "Personnalisé",
+                order_val,
+                datetime.now().isoformat()
+            ))
+            conn.commit()
+            return True
+
+    def remove_channel_from_custom_list(self, list_id: int, channel: Channel) -> bool:
+        """Retire une chaîne d'une liste personnalisée."""
+        if not channel:
+            return False
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            conds = ["list_id = ?"]
+            params: List[Any] = [list_id]
+
+            if channel.stream_id:
+                conds.append("(stream_id = ? OR (channel_name = ? AND stream_type = ?))")
+                params.extend([str(channel.stream_id), channel.name, channel.stream_type or "live"])
+            elif channel.stream_url:
+                conds.append("(stream_url = ? OR (channel_name = ? AND stream_type = ?))")
+                params.extend([channel.stream_url, channel.name, channel.stream_type or "live"])
+            else:
+                conds.append("channel_name = ? AND stream_type = ?")
+                params.extend([channel.name, channel.stream_type or "live"])
+
+            cursor.execute(f"DELETE FROM custom_channel_list_items WHERE {' AND '.join(conds)}", params)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def is_channel_in_custom_list(self, list_id: int, channel: Channel) -> bool:
+        """Vérifie si une chaîne est présente dans une liste personnalisée."""
+        if not channel:
+            return False
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            conds = ["list_id = ?"]
+            params: List[Any] = [list_id]
+
+            if channel.stream_id:
+                conds.append("(stream_id = ? AND stream_type = ?)")
+                params.extend([str(channel.stream_id), channel.stream_type or "live"])
+            elif channel.stream_url:
+                conds.append("(stream_url = ? AND stream_type = ?)")
+                params.extend([channel.stream_url, channel.stream_type or "live"])
+            else:
+                conds.append("channel_name = ? AND stream_type = ?")
+                params.extend([channel.name, channel.stream_type or "live"])
+
+            cursor.execute(f"SELECT 1 FROM custom_channel_list_items WHERE {' AND '.join(conds)} LIMIT 1", params)
+            return cursor.fetchone() is not None
+
+    def get_channel_custom_list_ids(self, channel: Channel) -> Set[int]:
+        """Retourne l'ensemble des IDs des listes personnalisées contenant cette chaîne."""
+        if not channel:
+            return set()
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            conds = []
+            params: List[Any] = []
+            if channel.stream_id:
+                conds.append("(stream_id = ? AND stream_type = ?)")
+                params.extend([str(channel.stream_id), channel.stream_type or "live"])
+            if channel.stream_url:
+                conds.append("stream_url = ?")
+                params.append(channel.stream_url)
+            conds.append("(channel_name = ? AND stream_type = ?)")
+            params.extend([channel.name, channel.stream_type or "live"])
+
+            cursor.execute(f"SELECT DISTINCT list_id FROM custom_channel_list_items WHERE {' OR '.join(conds)}", params)
+            return {r[0] for r in cursor.fetchall()}
+
+    def get_custom_channel_lists_with_counts(self, playlist_id: Optional[int] = None) -> List[Tuple[int, str, int]]:
+        """Retourne les listes sous la forme (id, nom, nombre_chaines)."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT l.id, l.name, COUNT(i.id) as item_count
+                FROM custom_channel_lists l
+                LEFT JOIN custom_channel_list_items i ON l.id = i.list_id
+                GROUP BY l.id
+                ORDER BY l.sort_order ASC, l.name COLLATE NOCASE ASC
+            """)
+            return [(r["id"], r["name"], r["item_count"]) for r in cursor.fetchall()]
+
+    def get_channels_for_custom_list(
+        self,
+        list_id: int,
+        playlist_id: Optional[int] = None,
+        search_query: Optional[str] = None,
+        order_by: str = "default",
+        limit: int = 50000,
+        offset: int = 0
+    ) -> List[Channel]:
+        """
+        Récupère toutes les chaînes d'une liste personnalisée sous forme d'objets Channel.
+        Assure une réconciliation intelligente avec la table channels.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM custom_channel_list_items WHERE list_id = ? ORDER BY order_index ASC, id ASC", (list_id,))
+            raw_items = cursor.fetchall()
+            if not raw_items:
+                return []
+
+            stream_ids = [str(r["stream_id"]) for r in raw_items if r["stream_id"]]
+            stream_urls = [r["stream_url"] for r in raw_items if r["stream_url"]]
+            names = [r["channel_name"] for r in raw_items if r["channel_name"]]
+            stream_types = list({r["stream_type"] for r in raw_items if r["stream_type"]})
+
+            matching_channels_map: Dict[str, Channel] = {}
+            ch_conds: List[str] = []
+            ch_params: List[Any] = []
+            if playlist_id is not None:
+                ch_conds.append("playlist_id = ?")
+                ch_params.append(playlist_id)
+
+            if stream_types:
+                ch_conds.append(f"stream_type IN ({','.join(['?']*len(stream_types))})")
+                ch_params.extend(stream_types)
+
+            sub_clauses = []
+            if stream_ids:
+                sub_clauses.append(f"stream_id IN ({','.join(['?']*len(stream_ids))})")
+                ch_params.extend(stream_ids)
+            if stream_urls:
+                sub_clauses.append(f"stream_url IN ({','.join(['?']*len(stream_urls))})")
+                ch_params.extend(stream_urls)
+            if names:
+                sub_clauses.append(f"name IN ({','.join(['?']*len(names))})")
+                ch_params.extend(names)
+
+            if sub_clauses:
+                ch_conds.append(f"({' OR '.join(sub_clauses)})")
+                q = f"SELECT * FROM channels WHERE {' AND '.join(ch_conds)}"
+                cursor.execute(q, ch_params)
+                for r in cursor.fetchall():
+                    c_dict = dict(r)
+                    if c_dict.get("extra_headers"):
+                        try:
+                            c_dict["extra_headers"] = json.loads(c_dict["extra_headers"])
+                        except Exception:
+                            c_dict["extra_headers"] = {}
+                    else:
+                        c_dict["extra_headers"] = {}
+                    ch_obj = _instantiate_dataclass(Channel, c_dict)
+                    stype = ch_obj.stream_type or "live"
+                    if ch_obj.stream_id:
+                        matching_channels_map[f"id:{ch_obj.stream_id}:{stype}"] = ch_obj
+                    if ch_obj.stream_url:
+                        matching_channels_map[f"url:{ch_obj.stream_url}"] = ch_obj
+                    matching_channels_map[f"name:{ch_obj.name.lower()}:{stype}"] = ch_obj
+
+            results: List[Channel] = []
+            for item in raw_items:
+                ch = None
+                item_stype = item["stream_type"] or "live"
+                if item["stream_id"] and f"id:{item['stream_id']}:{item_stype}" in matching_channels_map:
+                    ch = matching_channels_map[f"id:{item['stream_id']}:{item_stype}"]
+                elif item["stream_url"] and f"url:{item['stream_url']}" in matching_channels_map:
+                    ch = matching_channels_map[f"url:{item['stream_url']}"]
+                elif f"name:{item['channel_name'].lower()}:{item_stype}" in matching_channels_map:
+                    ch = matching_channels_map[f"name:{item['channel_name'].lower()}:{item_stype}"]
+
+                if ch is None:
+                    ch = Channel(
+                        id=None,
+                        playlist_id=playlist_id or 0,
+                        name=item["channel_name"],
+                        stream_url=item["stream_url"] or "",
+                        logo_url=item["logo_url"] or "",
+                        group_title=item["group_title"] or "Personnalisé",
+                        stream_type=item["stream_type"] or "live",
+                        stream_id=item["stream_id"],
+                        is_enabled=True,
+                    )
+
+                if search_query and search_query.strip():
+                    sq = search_query.strip().lower()
+                    if sq not in ch.name.lower() and sq not in (ch.group_title or "").lower():
+                        continue
+
+                results.append(ch)
+
+            if order_by == "name_asc":
+                results.sort(key=lambda c: c.name.lower())
+            elif order_by == "name_desc":
+                results.sort(key=lambda c: c.name.lower(), reverse=True)
+            elif order_by == "favorite_date_desc":
+                results.sort(key=lambda c: str(c.favorite_added_at or ""), reverse=True)
+            else:
+                # Ordre par défaut : respecte l'ordre naturel des chaînes dans la playlist (ch.id)
+                results.sort(key=lambda c: (c.id if c.id is not None else 999999999, c.name.lower()))
+
+            return results[offset:offset+limit]
+
+
 
