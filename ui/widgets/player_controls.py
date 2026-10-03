@@ -7,10 +7,10 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, Callable
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QSlider, QLabel,
-    QMenu, QFrame, QSizePolicy, QLayout
+    QMenu, QFrame, QSizePolicy, QLayout, QStyle, QStyleOptionSlider
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPoint, QRect
-from PyQt6.QtGui import QCursor, QMouseEvent, QWheelEvent, QFontMetrics
+from PyQt6.QtGui import QCursor, QMouseEvent, QWheelEvent, QFontMetrics, QPainter, QColor
 
 from core.models import Channel, EPGProgram
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
@@ -42,6 +42,196 @@ def format_seconds(seconds: float) -> str:
     if hours > 0:
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
+
+
+class VideoOSDTooltip(QFrame):
+    """
+    Infobulle personnalisée in-process intégrée à l'OSD.
+    Élimine à 100% les scintillements et flashs noirs provoqués par les fenêtres
+    natives de Qt (QToolTip / HWND) au-dessus de la surface OpenGL (QOpenGLWidget) sous Windows DWM.
+    """
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setObjectName("videoOsdTooltip")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setStyleSheet("""
+            #videoOsdTooltip {
+                background-color: rgba(15, 23, 42, 0.96);
+                border: 1px solid rgba(148, 163, 184, 0.35);
+                border-radius: 6px;
+            }
+            #videoOsdTooltip QLabel {
+                color: #f8fafc;
+                font-size: 11px;
+                font-weight: 500;
+                background: transparent;
+                padding: 4px 8px;
+            }
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.label = QLabel("", self)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.label)
+        self.hide()
+
+    def show_for_widget(self, target: QWidget, text: str, pos: Optional[QPoint] = None):
+        if not text:
+            self.hide()
+            return
+        self.label.setText(text)
+        self.adjustSize()
+        tt_w = self.width()
+        tt_h = self.height()
+        parent = self.parentWidget()
+        parent_w = parent.width() if parent else 800
+
+        if pos is not None and parent is not None:
+            pt = target.mapTo(parent, pos)
+            target_cx = pt.x()
+            target_ty = pt.y()
+        elif parent is not None:
+            pt = target.mapTo(parent, QPoint(0, 0))
+            target_cx = pt.x() + target.width() // 2
+            target_ty = pt.y()
+        else:
+            return
+
+        x = target_cx - tt_w // 2
+        x = max(10, min(x, parent_w - tt_w - 10))
+        y = target_ty - tt_h - 8
+        if y < 10:
+            if pos is not None:
+                y = target_ty + 18
+            else:
+                y = pt.y() + target.height() + 8
+
+        self.move(x, y)
+        self.show()
+        self.raise_()
+
+
+class ChapterTimelineSlider(QSlider):
+    """
+    Slider horizontal de timeline avec incrustation discrète et élégante des marqueurs de chapitres.
+    Intègre le snap magnétique (6px) au clic et la prévisualisation au survol de la souris.
+    """
+    seek_requested = pyqtSignal(float)
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.setRange(0, 1000)
+        self._chapters: List[Dict[str, Any]] = []
+        self._total_duration: float = 0.0
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_chapters(self, chapters: List[Dict[str, Any]], total_duration: Optional[float] = None):
+        self._chapters = chapters or []
+        if total_duration is not None and total_duration > 0:
+            self._total_duration = total_duration
+        self.update()
+
+    def set_total_duration(self, total_duration: float):
+        if total_duration != self._total_duration:
+            self._total_duration = total_duration
+            self.update()
+
+    def _get_geometry_info(self):
+        opt = QStyleOptionSlider()
+        self.initStyleOption(opt)
+        groove = self.style().subControlRect(QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderGroove, self)
+        handle = self.style().subControlRect(QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderHandle, self)
+        avail_w = max(1, groove.width() - handle.width())
+        start_x = groove.left() + handle.width() // 2
+        return groove, handle, avail_w, start_x
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self._chapters or self._total_duration <= 0:
+            return
+
+        groove, handle, avail_w, start_x = self._get_geometry_info()
+        gy = int(groove.y())
+        gh = int(groove.height())
+        handle_center = handle.center().x()
+        handle_half_w = handle.width() // 2
+
+        painter = QPainter(self)
+
+        for c in self._chapters:
+            t = c.get("time", 0.0)
+            if t <= 0.0 or t >= self._total_duration:
+                continue
+            ratio = t / self._total_duration
+            x = start_x + int(ratio * avail_w)
+
+            # Ne pas dessiner sous le curseur de lecture blanc
+            if abs(x - handle_center) < (handle_half_w + 2):
+                continue
+
+            if x > handle_center:
+                # Chapitre à venir : marqueur blanc net de 2px, bien visible sur la barre sombre #313e58
+                painter.fillRect(x - 1, gy, 2, gh, QColor(248, 250, 252, 240))
+            else:
+                # Chapitre déjà passé : fin séparateur discret translucide (aucun trait noir disgracieux dans la barre violette)
+                painter.fillRect(x, gy, 1, gh, QColor(255, 255, 255, 110))
+
+        painter.end()
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        if self._total_duration <= 0:
+            self.setToolTip("")
+            return
+
+        groove, handle, avail_w, start_x = self._get_geometry_info()
+        pos_x = event.position().x()
+        ratio = max(0.0, min(1.0, (pos_x - start_x) / avail_w))
+        hover_time = ratio * self._total_duration
+
+        near_chapter = None
+        if self._chapters:
+            for idx, c in enumerate(self._chapters):
+                t = c.get("time", 0.0)
+                cx = start_x + int((t / self._total_duration) * avail_w)
+                if abs(pos_x - cx) <= 8:
+                    raw_title = c.get("title", "")
+                    if not raw_title or ":" in raw_title:
+                        title = f"Chapitre {idx + 1}"
+                    else:
+                        title = raw_title
+                    near_chapter = (t, title)
+                    break
+
+        if near_chapter:
+            t, title = near_chapter
+            self.setToolTip(f"{format_seconds(t)} • {title}")
+        else:
+            self.setToolTip(format_seconds(hover_time))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._total_duration > 0:
+            groove, handle, avail_w, start_x = self._get_geometry_info()
+            pos_x = event.position().x()
+            ratio = max(0.0, min(1.0, (pos_x - start_x) / avail_w))
+            target_time = ratio * self._total_duration
+
+            # Snap magnétique si le clic est à moins de 6 pixels d'un marqueur de chapitre
+            for c in self._chapters:
+                t = c.get("time", 0.0)
+                cx = start_x + int((t / self._total_duration) * avail_w)
+                if abs(pos_x - cx) <= 6:
+                    target_time = t
+                    break
+
+            val = int((target_time / self._total_duration) * 1000)
+            self.setValue(val)
+            self.seek_requested.emit(target_time)
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
 class PlayerControls(QWidget):
@@ -88,6 +278,7 @@ class PlayerControls(QWidget):
         self.is_fullscreen = False
         self.total_duration = 0.0
         self.tracks: List[Dict[str, Any]] = []
+        self.chapters: List[Dict[str, Any]] = []
         self.allow_wheel_scroll = False
         self.scroll_target: Optional[QWidget] = None
         self._custom_back_text: Optional[str] = None
@@ -95,6 +286,7 @@ class PlayerControls(QWidget):
         self._epg_provider: Optional[Callable[[str], Optional[EPGProgram]]] = None
 
         self._init_ui()
+        self.osd_tooltip = VideoOSDTooltip(self)
 
     def set_epg_provider(self, provider: Optional[Callable[[str], Optional[EPGProgram]]]):
         """Définit la fonction permettant d'interroger le programme EPG actuel pour une chaîne."""
@@ -166,6 +358,7 @@ class PlayerControls(QWidget):
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def hide_bars(self):
+        self.hide_custom_tooltip()
         self.top_bar.hide()
         self.bottom_bar.hide()
         self.setCursor(Qt.CursorShape.BlankCursor)
@@ -177,6 +370,7 @@ class PlayerControls(QWidget):
         return bool(top_vis or bot_vis)
 
     def hide(self):
+        self.hide_custom_tooltip()
         self.top_bar.hide()
         self.bottom_bar.hide()
         if hasattr(self, "buffering_indicator"):
@@ -357,10 +551,11 @@ class PlayerControls(QWidget):
         self.curr_time_label.setStyleSheet("color: #cbd5e1; font-size: 12px; font-weight: 600;")
         time_layout.addWidget(self.curr_time_label)
 
-        self.timeline_slider = QSlider(Qt.Orientation.Horizontal)
+        self.timeline_slider = ChapterTimelineSlider(self.timeline_row)
         self.timeline_slider.setRange(0, 1000)
         self.timeline_slider.sliderMoved.connect(self._on_slider_moved)
         self.timeline_slider.sliderReleased.connect(self._on_slider_released)
+        self.timeline_slider.seek_requested.connect(self.seek_requested.emit)
         time_layout.addWidget(self.timeline_slider)
 
         self.total_time_label = QLabel("00:00")
@@ -855,6 +1050,7 @@ class PlayerControls(QWidget):
             return
 
         self.total_duration = total_sec
+        self.timeline_slider.set_total_duration(total_sec)
         if total_sec > 0:
             self.timeline_row.setVisible(True)
             self.curr_time_label.setText(format_seconds(current_sec))
@@ -886,6 +1082,18 @@ class PlayerControls(QWidget):
 
     def set_tracks(self, tracks: List[Dict[str, Any]]):
         self.tracks = tracks
+
+    def set_chapters(self, chapters: List[Dict[str, Any]]):
+        self.chapters = chapters or []
+        self.timeline_slider.set_chapters(self.chapters, self.total_duration)
+
+    def show_custom_tooltip(self, target: QWidget, text: str, pos: Optional[QPoint] = None):
+        if hasattr(self, "osd_tooltip"):
+            self.osd_tooltip.show_for_widget(target, text, pos)
+
+    def hide_custom_tooltip(self):
+        if hasattr(self, "osd_tooltip") and self.osd_tooltip.isVisible():
+            self.osd_tooltip.hide()
 
     # ------------------ ÉVÉNEMENTS ------------------
 

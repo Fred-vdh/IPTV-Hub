@@ -91,6 +91,29 @@ class ImageLoader(QObject):
                 return pix
         return None
 
+    def load_image(self, url: str, on_success=None):
+        """Charge une image de manière asynchrone avec callback optionnel de succès."""
+        url = self.normalize_url(url)
+        if not url:
+            return
+        cached = self.get_cached_image(url)
+        if cached:
+            if on_success:
+                on_success(cached)
+            return
+
+        if on_success:
+            def _handler(loaded_url: str, px: QPixmap):
+                if loaded_url == url:
+                    try:
+                        self.image_loaded.disconnect(_handler)
+                    except Exception:
+                        pass
+                    on_success(px)
+            self.image_loaded.connect(_handler)
+
+        self.request_image(url)
+
     def request_image(self, url: str):
         """Met en file d'attente le téléchargement de l'affiche de manière non-bloquante."""
         url = self.normalize_url(url)

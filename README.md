@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.2.2-blue.svg?style=flat-square" alt="Version 2.2.2">
+  <img src="https://img.shields.io/badge/version-2.3.0-blue.svg?style=flat-square" alt="Version 2.3.0">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-brightgreen.svg?style=flat-square" alt="Plateformes">
   <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-square" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/GUI-PyQt6-green.svg?style=flat-square" alt="PyQt6">
@@ -80,15 +80,15 @@
 
 ---
 
-## 📦 Téléchargements (Releases v2.2.2)
+## 📦 Téléchargements (Releases v2.3.0)
 
 Vous pouvez télécharger la version adaptée à votre système directement depuis la section **[Releases](https://github.com/Fred-vdh/IPTV-Hub/releases/latest)** :
 
 | Système | Format | Description | Lien |
 | :--- | :--- | :--- | :--- |
-| **Windows 10 / 11** | **Installateur (`.exe`)** | Assistant d'installation complet (raccourcis bureau, menu Démarrer, DLLs incluses) | 📥 [**Télécharger l'installateur Windows**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.2.2/IPTV_Hub_Setup.exe) |
-| **Windows 10 / 11** | **Version Portable (`.zip`)** | Prêt à l'emploi sans installation (décompressez et lancez `IPTV_Hub.exe`) | 📥 [**Télécharger la version Portable**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.2.2/IPTV_Hub_Portable_Win64.zip) |
-| **Linux** (Toutes distributions) | **Paquet d'installation (`.tar.gz`)** | Installation automatique avec intégration bureau XDG et raccourci dans vos applications | 📥 [**Télécharger le paquet Linux**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.2.2/IPTV_Hub_Linux.tar.gz) |
+| **Windows 10 / 11** | **Installateur (`.exe`)** | Assistant d'installation complet (raccourcis bureau, menu Démarrer, DLLs incluses) | 📥 [**Télécharger l'installateur Windows**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.3.0/IPTV_Hub_Setup.exe) |
+| **Windows 10 / 11** | **Version Portable (`.zip`)** | Prêt à l'emploi sans installation (décompressez et lancez `IPTV_Hub.exe`) | 📥 [**Télécharger la version Portable**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.3.0/IPTV_Hub_Portable_Win64.zip) |
+| **Linux** (Toutes distributions) | **Paquet d'installation (`.tar.gz`)** | Installation automatique avec intégration bureau XDG et raccourci dans vos applications | 📥 [**Télécharger le paquet Linux**](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.3.0/IPTV_Hub_Linux.tar.gz) |
 
 ---
 
@@ -100,6 +100,12 @@ Vous pouvez télécharger la version adaptée à votre système directement depu
 - **Guide Électronique des Programmes (EPG)** : Affichage du programme en cours et du programme suivant en temps réel.
 - **Grille EPG interactive** : Vue chronologique complète avec curseur d'avancement horaire.
 
+### 📥 Gestionnaire de Téléchargements (Mode Hors-ligne)
+- **Téléchargement de films et séries VOD** : Enregistrez vos contenus préférés en un clic directement depuis les fiches de détails.
+- **File d'attente intelligente & reprise** : Reprise automatique des téléchargements interrompus (HTTP Range) et respect de la file FIFO.
+- **Suivi en temps réel & réglages** : Vitesse, pourcentage, temps restant, choix du dossier de destination et limitation de débit optionnelle dans les paramètres.
+- **Gestionnaire intégré** : Vue dédiée accessible dans la barre latérale sous « Récemment ajouté » avec onglets En cours et Terminés.
+
 ### 🗂️ Listes Personnalisées & Synchronisation
 - **Listes de chaînes sur-mesure** : Créez vos propres bouquets personnalisés (ex: *Salon HD*, *Van SD*, *Sport*, *Enfants*) en piochant librement parmi toutes vos chaînes, avec tri automatique respectant l'ordre TNT et playlist.
 - **Synchronisation locale par QR Code** : Transférez instantanément vos playlists, favoris, historique et listes personnalisées vers un autre appareil (PC portable, second écran) via scan d'un QR code sur votre réseau local.
@@ -107,6 +113,7 @@ Vous pouvez télécharger la version adaptée à votre système directement depu
 
 ### 🎬 Vidéo à la Demande (Films & Séries)
 - **Métadonnées et enrichissement TMDB** : Récupération automatique des affiches officielles, synopsis, casting complet, notes et dates de sortie.
+- **Chapitrage & Marqueurs de timeline** : Détection automatique des chapitres intégrés aux fichiers vidéo avec marqueurs visuels discrets et infobulles sur la barre de progression.
 - **Saut automatique du générique (IntroDB)** : Détection intelligente et bouton discret pour ignorer l'intro de vos séries préférées en un clic ou automatiquement.
 - **Recherche & Filmographie par artiste** : Effectuez des recherches ciblées par acteur ou réalisateur (ou cliquez sur n'importe quel artiste dans une fiche) pour découvrir sa biographie complète et retrouver tous ses films et séries disponibles dans votre playlist !
 - **Gestion intelligente des séries** : Sélecteur clair des saisons et épisodes, affichage des vignettes 16:9, reprise automatique de lecture et enchaînement automatique de l'épisode suivant (*Auto-Play*).
@@ -123,7 +130,7 @@ Vous pouvez télécharger la version adaptée à votre système directement depu
 
 ### 🗂️ Gestion des Playlists & Sécurité
 - **Multi-fournisseurs** : Prise en charge des API **Xtream Codes** (URL, utilisateur, mot de passe) et des fichiers/liens **M3U/M3U8**.
-- **Gestionnaire de catégories** : Masquage facile des bouquets de chaînes indésirables ou redondants.
+- **Gestionnaire de catégories** : Masquage facile des bouquets de chaînes indésirables ou redondants (y compris les flux radios).
 - **Favoris et Historique** : Système d'étoiles rapide et historique des derniers programmes regardés.
 - **Confidentialité totale** : Aucune donnée de vos listes de lecture ne transite par des serveurs tiers ; la base de données SQLite reste 100% locale à votre machine.
 
@@ -134,12 +141,12 @@ Vous pouvez télécharger la version adaptée à votre système directement depu
 ### 🪟 Sous Windows
 
 #### Méthode 1 : Installateur classique
-1. Téléchargez [`IPTV_Hub_Setup.exe`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.2.2/IPTV_Hub_Setup.exe).
+1. Téléchargez [`IPTV_Hub_Setup.exe`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.3.0/IPTV_Hub_Setup.exe).
 2. Lancez l'exécutable et suivez l'assistant d'installation (disponible en français et en anglais).
 3. L'application est installée et accessible depuis votre Bureau et votre menu Démarrer.
 
 #### Méthode 2 : Version Portable
-1. Téléchargez [`IPTV_Hub_Portable_Win64.zip`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.2.2/IPTV_Hub_Portable_Win64.zip).
+1. Téléchargez [`IPTV_Hub_Portable_Win64.zip`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.3.0/IPTV_Hub_Portable_Win64.zip).
 2. Décompressez l'archive où vous le souhaitez (disque dur, clé USB).
 3. Double-cliquez sur `IPTV_Hub.exe` pour démarrer directement !
 
@@ -147,7 +154,7 @@ Vous pouvez télécharger la version adaptée à votre système directement depu
 
 ### 🐧 Sous Linux (Ubuntu, Debian, Linux Mint, Zorin OS, Fedora, Arch...)
 
-1. Téléchargez [`IPTV_Hub_Linux.tar.gz`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.2.2/IPTV_Hub_Linux.tar.gz).
+1. Téléchargez [`IPTV_Hub_Linux.tar.gz`](https://github.com/Fred-vdh/IPTV-Hub/releases/download/v2.3.0/IPTV_Hub_Linux.tar.gz).
 2. Ouvrez un terminal dans le dossier et lancez :
    ```bash
    tar -xzf IPTV_Hub_Linux.tar.gz

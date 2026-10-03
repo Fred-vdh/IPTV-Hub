@@ -122,6 +122,10 @@ class Sidebar(QFrame):
         self.btn_recent_added = self._create_icon_btn("new_releases", "recently_added", "Récemment ajoutés (TV, VOD, Séries)")
         layout.addWidget(self.btn_recent_added, 0, Qt.AlignmentFlag.AlignHCenter)
 
+        # 10. Téléchargements
+        self.btn_downloads = self._create_icon_btn("file_download", "downloads", "Téléchargements")
+        layout.addWidget(self.btn_downloads, 0, Qt.AlignmentFlag.AlignHCenter)
+
         layout.addStretch(1)
 
         # --- Bas de page : Gestion des listes & Paramètres ---
@@ -158,6 +162,7 @@ class Sidebar(QFrame):
             "series": self.btn_series,
             "epg": self.btn_epg,
             "recently_added": self.btn_recent_added,
+            "downloads": self.btn_downloads,
         }
         btn = mapping.get(section_id)
         if btn:
@@ -176,6 +181,7 @@ class Sidebar(QFrame):
             "series": self.btn_series,
             "epg": self.btn_epg,
             "recently_added": self.btn_recent_added,
+            "downloads": self.btn_downloads,
         }
         btn = mapping.get(section_id)
         if btn:
@@ -207,6 +213,7 @@ class Sidebar(QFrame):
         self.btn_vod.setToolTip(tr("Films (VOD)"))
         self.btn_series.setToolTip(tr("Séries"))
         self.btn_recent_added.setToolTip(tr("Récemment ajoutés (TV, VOD, Séries)"))
+        self.btn_downloads.setToolTip(tr("Téléchargements"))
         self.btn_manage_pl.setToolTip(tr("Gérer les listes de lecture"))
         self.btn_settings.setToolTip(tr("Paramètres de l'application"))
 

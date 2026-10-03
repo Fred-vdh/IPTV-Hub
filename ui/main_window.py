@@ -3,6 +3,7 @@ Fenêtre principale du lecteur IPTV moderne sans bordure (Frameless) avec barre 
 personnalisée intégrée, thème gris foncé bleuté, et panneau des paramètres intégré in-place.
 """
 
+import os
 import time
 from typing import Optional, Any
 from PyQt6.QtWidgets import (
@@ -38,6 +39,8 @@ from ui.widgets.recently_added_view import RecentlyAddedView
 from ui.widgets.dashboard_view import DashboardView
 from ui.widgets.epg_grid_view import EPGGridView
 from ui.widgets.replay_view import ReplayView
+from ui.widgets.downloads_view import DownloadsView
+from core.download_manager import DownloadManager, DownloadItem
 from ui.icons import get_app_logo_icon, get_icon
 from core.i18n import tr, I18nManager
 from ui.dialogs.themed_input_dialog import ThemedInputDialog
@@ -340,6 +343,10 @@ class MainWindow(QMainWindow):
         self.replay_view = ReplayView(self.db, parent=self)
         self.content_stack.addWidget(self.replay_view)
 
+        # Page 8 : Vue Téléchargements Dédiée (Gestion hors-ligne, progression, stockage)
+        self.downloads_view = DownloadsView(self.db, parent=self)
+        self.content_stack.addWidget(self.downloads_view)
+
         body_layout.addWidget(self.content_stack, stretch=1)
         root_layout.addWidget(self.body_widget, stretch=1)
 
@@ -387,6 +394,10 @@ class MainWindow(QMainWindow):
         self.dashboard_view.resume_playback_requested.connect(self._on_resume_playback)
         self.dashboard_view.navigate_section_requested.connect(self._on_dashboard_navigate)
         self.dashboard_view.playlist_switched.connect(self._on_dashboard_playlist_switched)
+        self.dashboard_view.download_selected.connect(self._on_play_download)
+
+        # Vue Téléchargements
+        self.downloads_view.play_download_requested.connect(self._on_play_download)
 
         # Vue Guide TV (EPG)
         self.epg_grid_view.play_channel_requested.connect(self.play_channel)
@@ -785,6 +796,9 @@ class MainWindow(QMainWindow):
             self.replay_view.set_playlist_id(playlist_id)
             self.replay_view.refresh_view()
             return
+        elif current_content_idx == 8 and hasattr(self, "downloads_view"):
+            self.downloads_view.refresh()
+            return
         elif current_content_idx == 1:
             # Mode Paramètres : ne rien changer
             return
@@ -1015,6 +1029,18 @@ class MainWindow(QMainWindow):
                 self.video_widget.next_ep_overlay.pause_countdown()
             elif state == "playing":
                 self.video_widget.next_ep_overlay.resume_countdown()
+
+        # Règle IPTV : mettre en pause les téléchargements pendant la lecture vidéo pour ne pas saturer
+        if state == "playing":
+            is_local = False
+            if self.current_channel:
+                url = self.current_channel.stream_url or ""
+                if url.startswith("file://") or os.path.exists(url):
+                    is_local = True
+            if not is_local:
+                DownloadManager.instance().pause_all_for_playback()
+        elif state in ("stopped", "idle"):
+            DownloadManager.instance().resume_all_after_playback()
 
     def _prepare_introdb_for_current_episode(self):
         """Recherche en tâche de fond les marqueurs IntroDB pour l'épisode de série lancé."""
@@ -1535,6 +1561,9 @@ class MainWindow(QMainWindow):
             self.content_stack.setCurrentIndex(7)  # Vue TV Replay (Rattrapage 7 jours)
             self.replay_view.set_playlist_id(pl_id)
             self.replay_view.refresh_view()
+        elif section_id == "downloads":
+            self.content_stack.setCurrentIndex(8)  # Vue Téléchargements Dédiée
+            self.downloads_view.refresh()
         elif section_id == "vod":
             self.content_stack.setCurrentIndex(0)
             self.channel_panel.hide()
@@ -1594,6 +1623,9 @@ class MainWindow(QMainWindow):
             self.content_stack.setCurrentIndex(7)
             self.replay_view.set_playlist_id(playlist_id)
             self.replay_view.refresh_view()
+        elif self.current_section == "downloads":
+            self.content_stack.setCurrentIndex(8)
+            self.downloads_view.refresh()
         elif self.current_section == "vod":
             self.content_stack.setCurrentIndex(0)
             self.main_content_stack.setCurrentIndex(1)
@@ -2341,6 +2373,12 @@ class MainWindow(QMainWindow):
             self.replay_view.refresh_view()
             return
 
+        if self.current_section == "downloads" or getattr(self, "_return_target_index", 1) == 8:
+            self.content_stack.setCurrentIndex(8)
+            self._update_search_placeholder("downloads", clear_text=True)
+            self.downloads_view.refresh()
+            return
+
         target_idx = getattr(self, "_return_target_index", 1)
         if target_idx == 4 and hasattr(self, "movie_details_view"):
             self.current_section = "vod"
@@ -2401,7 +2439,7 @@ class MainWindow(QMainWindow):
         """Redirige la navigation depuis les boutons 'Voir tout >' du tableau de bord."""
         if section_key == "manage_playlists":
             self._show_manage_playlists_dialog()
-        elif section_key in ("live", "vod", "series", "favorites", "history", "epg", "recently_added"):
+        elif section_key in ("live", "vod", "series", "favorites", "history", "epg", "recently_added", "downloads"):
             if section_key == "history" and hasattr(self, "history_view"):
                 self.history_view._set_stream_type("all")
             self.sidebar.select_section(section_key)
@@ -2411,6 +2449,25 @@ class MainWindow(QMainWindow):
         if playlist.id:
             self.refresh_playlists_combo(select_playlist_id=playlist.id)
             self._on_playlist_changed(playlist.id)
+
+    def _on_play_download(self, item: DownloadItem):
+        """Lance la lecture hors-ligne d'un fichier vidéo téléchargé."""
+        if not item or not item.local_file_path or not os.path.exists(item.local_file_path):
+            QMessageBox.warning(self, tr("Fichier introuvable"), tr("Le fichier vidéo téléchargé n'existe plus sur le disque."))
+            return
+        self._return_target_index = 8 if self.current_section == "downloads" else 4
+        title = f"{item.title} ({item.sub_title})" if item.sub_title else item.title
+        local_channel = Channel(
+            id=None,
+            name=title,
+            stream_url=item.local_file_path,
+            logo_url=item.poster_url,
+            stream_type=item.stream_type or "movie",
+            group_title="Téléchargements"
+        )
+        self.play_channel(local_channel)
+        back_text = "‹  Retour aux téléchargements" if self.current_section == "downloads" else "‹  Retour au tableau de bord"
+        self.video_widget.controls.set_back_button_text(back_text)
 
 
     def _open_manage_categories_dialog(self, initial_tab: int = 0):

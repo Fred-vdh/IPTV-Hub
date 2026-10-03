@@ -238,6 +238,7 @@ class AppSettings:
     window_maximized: bool = False
     window_fullscreen: bool = False
     download_dir: str = ""
+    download_speed_limit: int = 0
     sync_enabled: bool = False
     sync_folder: str = ""
     sync_last_timestamp: str = ""

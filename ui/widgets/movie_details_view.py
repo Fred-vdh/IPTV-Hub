@@ -23,7 +23,10 @@ from PyQt6.QtWidgets import (
 )
 
 from core.database import Database
-from core.download_manager import DownloadManager, DownloadTask, get_default_download_dir
+from core.download_manager import (
+    DownloadManager, DownloadTask, get_default_download_dir,
+    DownloadItem, DownloadStatus
+)
 from core.image_loader import ImageLoader
 from core.models import Channel, Playlist, parse_movie_metadata
 from core.xtream_client import XtreamClient
@@ -129,6 +132,10 @@ class MovieDetailsView(QWidget):
         self.setObjectName("movieDetailsView")
         self.setStyleSheet("QWidget#movieDetailsView { background-color: #0d111a; }")
         self.setCursor(Qt.CursorShape.ArrowCursor)
+
+        DownloadManager.instance().download_progress.connect(self._on_global_dl_progress)
+        DownloadManager.instance().download_status_changed.connect(self._on_global_dl_status)
+
         self._init_ui()
 
     def _init_ui(self):
@@ -284,8 +291,8 @@ class MovieDetailsView(QWidget):
         self.play_btn.clicked.connect(self._on_play)
         actions_row.addWidget(self.play_btn)
 
-        # Bouton "Du début"
-        self.restart_btn = QPushButton("  " + tr("Du début"))
+        # Bouton "Reprendre du début"
+        self.restart_btn = QPushButton("  " + tr("Reprendre du début"))
         self.restart_btn.setIcon(get_icon("replay", color="#cbd5e1"))
         self.restart_btn.setIconSize(QSize(15, 15))
         self.restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -308,30 +315,6 @@ class MovieDetailsView(QWidget):
         self.restart_btn.hide()
         actions_row.addWidget(self.restart_btn)
 
-        # Bouton "Annuler reprise"
-        self.clear_resume_btn = QPushButton("  " + tr("Annuler reprise"))
-        self.clear_resume_btn.setIcon(get_icon("restart_alt", color="#f87171"))
-        self.clear_resume_btn.setIconSize(QSize(15, 15))
-        self.clear_resume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.clear_resume_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(239, 68, 68, 0.12);
-                color: #f87171;
-                border: 1px solid rgba(239, 68, 68, 0.3);
-                border-radius: 8px;
-                padding: 10px 16px;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: #ef4444;
-                color: #ffffff;
-            }
-        """)
-        self.clear_resume_btn.clicked.connect(self._on_clear_resume)
-        self.clear_resume_btn.hide()
-        actions_row.addWidget(self.clear_resume_btn)
-
         # Bouton Favoris
         self.fav_btn = QPushButton()
         self.fav_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -344,7 +327,7 @@ class MovieDetailsView(QWidget):
         self.download_btn.setIconSize(QSize(16, 16))
         self.download_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._style_download_btn()
-        self.download_btn.clicked.connect(self._on_download)
+        self.download_btn.clicked.connect(self._on_download_btn_clicked)
         actions_row.addWidget(self.download_btn)
 
         actions_row.addStretch()
@@ -576,6 +559,7 @@ class MovieDetailsView(QWidget):
         self._load_poster()
         self.poster_label.set_added_at(channel.added_at, "movie")
         self._update_fav_btn()
+        self._update_download_button_state()
 
         # Image de fond par défaut (affiche) en attendant les métadonnées
         if channel.logo_url:
@@ -691,11 +675,9 @@ class MovieDetailsView(QWidget):
     def _refresh_action_buttons(self):
         if self.resume_pos > 0:
             self.play_btn.setText(f"  {tr('Reprendre à {time}', time=_fmt(self.resume_pos))}")
-            self.clear_resume_btn.show()
             self.restart_btn.show()
         else:
             self.play_btn.setText("  " + tr("Regarder le film"))
-            self.clear_resume_btn.hide()
             self.restart_btn.hide()
 
     def _update_fav_btn(self):
@@ -763,14 +745,9 @@ class MovieDetailsView(QWidget):
         if self.channel:
             self.db.clear_playback_progress(self.channel.id, self.channel.stream_url)
             self.resume_pos = 0.0
-            self.play_requested.emit(self.channel, 0.0)
-
-    def _on_clear_resume(self):
-        if self.channel:
-            self.db.clear_playback_progress(self.channel.id, self.channel.stream_url)
-            self.resume_pos = 0.0
             self._refresh_action_buttons()
             self.progress_cleared.emit(self.channel)
+            self.play_requested.emit(self.channel, 0.0)
 
     def _toggle_favorite(self):
         if self.channel:
@@ -779,6 +756,86 @@ class MovieDetailsView(QWidget):
             if self.channel.id:
                 self.db.toggle_favorite(self.channel.id, new_fav)
             self._update_fav_btn()
+
+    def _on_download_btn_clicked(self):
+        if not self.channel:
+            return
+        stream_id = str(self.channel.stream_id or self.channel.id or abs(hash(self.channel.stream_url)))
+        mgr = DownloadManager.instance()
+        dl_item = mgr.get_download_by_stream_id(stream_id)
+
+        if dl_item and dl_item.status == DownloadStatus.COMPLETED and os.path.exists(dl_item.local_file_path):
+            local_ch = Channel(
+                id=self.channel.id,
+                name=self.channel.name,
+                stream_url=dl_item.local_file_path,
+                logo_url=self.channel.logo_url,
+                stream_type="movie",
+                group_title=self.channel.group_title
+            )
+            self.play_requested.emit(local_ch, 0.0)
+        elif dl_item and dl_item.status in (DownloadStatus.DOWNLOADING, DownloadStatus.QUEUED):
+            return
+        else:
+            self._on_download()
+
+    def _update_download_button_state(self):
+        if not self.channel:
+            return
+        stream_id = str(self.channel.stream_id or self.channel.id or abs(hash(self.channel.stream_url)))
+        mgr = DownloadManager.instance()
+        dl_item = mgr.get_download_by_stream_id(stream_id)
+
+        if dl_item and dl_item.status == DownloadStatus.COMPLETED and os.path.exists(dl_item.local_file_path):
+            self.download_btn.setEnabled(True)
+            self.download_btn.setText("  " + tr("✓ Téléchargé (Lire hors ligne)"))
+            self.download_btn.setIcon(get_icon("check_circle", color="#4ade80"))
+            self.download_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #064e3b;
+                    color: #4ade80;
+                    border: 1px solid #059669;
+                    border-radius: 8px;
+                    padding: 10px 16px;
+                    font-size: 12px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #047857;
+                    color: #ffffff;
+                }
+            """)
+        elif dl_item and dl_item.status == DownloadStatus.DOWNLOADING:
+            self.download_btn.setEnabled(False)
+            speed = dl_item.get_formatted_speed()
+            pct = dl_item.progress_percent
+            self.download_btn.setText(f"  {pct}% ({speed})" if speed else f"  {pct}%")
+            self._style_download_btn()
+        elif dl_item and dl_item.status == DownloadStatus.QUEUED:
+            self.download_btn.setEnabled(False)
+            self.download_btn.setText("  " + tr("En attente..."))
+            self._style_download_btn()
+        else:
+            self.download_btn.setEnabled(True)
+            self.download_btn.setText("  " + tr("Télécharger"))
+            self.download_btn.setIcon(get_icon("file_download", color="#38bdf8"))
+            self._style_download_btn()
+
+    def _on_global_dl_progress(self, item: DownloadItem):
+        if not self.channel:
+            return
+        stream_id = str(self.channel.stream_id or self.channel.id or abs(hash(self.channel.stream_url)))
+        if item.stream_id == stream_id:
+            speed = item.get_formatted_speed()
+            pct = item.progress_percent
+            self.download_btn.setText(f"  {pct}% ({speed})" if speed else f"  {pct}%")
+
+    def _on_global_dl_status(self, item: DownloadItem):
+        if not self.channel:
+            return
+        stream_id = str(self.channel.stream_id or self.channel.id or abs(hash(self.channel.stream_url)))
+        if item.stream_id == stream_id:
+            self._update_download_button_state()
 
     def _on_download(self):
         if not self.channel:
@@ -792,9 +849,6 @@ class MovieDetailsView(QWidget):
             QMessageBox.warning(None, "Erreur de dossier", str(e))
             return
 
-        self.download_btn.setEnabled(False)
-        self.download_btn.setText("  Téléchargement...")
-
         headers = {}
         if self.channel.http_referrer:
             headers["Referer"] = self.channel.http_referrer
@@ -802,55 +856,28 @@ class MovieDetailsView(QWidget):
             headers.update(self.channel.extra_headers)
 
         ua = self.channel.user_agent or settings.user_agent
-        self._download_task = DownloadManager.instance().start_download(
-            url=self.channel.stream_url,
-            dest_dir=dest_dir,
-            base_name=self.channel.name,
+
+        ext = "mp4"
+        clean_url = (self.channel.stream_url or "").split("?")[0].lower()
+        for cand in [".mp4", ".mkv", ".avi", ".ts", ".m4v", ".mov"]:
+            if clean_url.endswith(cand):
+                ext = cand[1:]
+                break
+
+        stream_id = str(self.channel.stream_id or self.channel.id or abs(hash(self.channel.stream_url)))
+        item = DownloadItem(
+            id=f"movie_{stream_id}",
+            stream_id=stream_id,
+            title=self.channel.name,
+            poster_url=self.channel.logo_url,
+            stream_url=self.channel.stream_url,
+            stream_type="movie",
+            container_extension=ext,
             user_agent=ua,
-            headers=headers,
+            custom_headers=headers
         )
-        self._download_task.progress.connect(self._on_dl_progress)
-        self._download_task.finished.connect(self._on_dl_finished)
-        self._download_task.error.connect(self._on_dl_error)
-
-    def _on_dl_progress(self, downloaded: int, total: int, speed: str):
-        if total > 0:
-            pct = int(downloaded / total * 100)
-            self.download_btn.setText(f"  {pct}% ({speed})")
-        else:
-            mb = downloaded / (1024 * 1024)
-            self.download_btn.setText(f"  {mb:.1f} Mo ({speed})")
-
-    def _on_dl_finished(self, output_path: str):
-        self.download_btn.setEnabled(True)
-        self.download_btn.setText("  " + tr("✓ Téléchargé"))
-        self.download_btn.setIcon(get_icon("check_circle", color="#4ade80"))
-        self.download_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #064e3b;
-                color: #4ade80;
-                border: 1px solid #059669;
-                border-radius: 8px;
-                padding: 10px 16px;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: #047857;
-                color: #ffffff;
-            }
-        """)
-        try:
-            self.download_btn.clicked.disconnect()
-        except Exception:
-            pass
-        self.download_btn.clicked.connect(lambda: os.startfile(os.path.dirname(output_path)))
-
-    def _on_dl_error(self, _):
-        self.download_btn.setEnabled(True)
-        self.download_btn.setText("  " + tr("Télécharger"))
-        self.download_btn.setIcon(get_icon("file_download", color="#38bdf8"))
-        self._style_download_btn()
+        DownloadManager.instance().enqueue_download(item)
+        self._update_download_button_state()
 
     def _on_extra_info_loaded(self, data: dict):
         info = data.get("info", {}) or data.get("movie_data", {})
@@ -1315,9 +1342,7 @@ class MovieDetailsView(QWidget):
         if hasattr(self, "play_btn"):
             self._refresh_action_buttons()
         if hasattr(self, "restart_btn"):
-            self.restart_btn.setText("  " + tr("Du début"))
-        if hasattr(self, "clear_resume_btn"):
-            self.clear_resume_btn.setText("  " + tr("Annuler reprise"))
+            self.restart_btn.setText("  " + tr("Reprendre du début"))
         if hasattr(self, "download_btn"):
             if not self._download_task or not getattr(self._download_task, "is_running", False):
                 self.download_btn.setText("  " + tr("Télécharger"))

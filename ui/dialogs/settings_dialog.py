@@ -19,7 +19,7 @@ class SettingsDialog(QDialog):
         self.db = db
         self.settings = self.db.get_settings()
         self.setWindowTitle("Paramètres")
-        self.resize(500, 440)
+        self.resize(520, 520)
         self._init_ui()
 
     def _init_ui(self):
@@ -75,6 +75,38 @@ class SettingsDialog(QDialog):
         sep.setStyleSheet("background-color: #1e2433;")
         layout.addWidget(sep)
 
+        # 6. Dossier de téléchargement
+        from core.download_manager import get_default_download_dir
+
+        layout.addWidget(QLabel("Dossier de téléchargement :"))
+        dl_row = QHBoxLayout()
+        self.dl_input = QLineEdit(self.settings.download_dir or get_default_download_dir())
+        dl_row.addWidget(self.dl_input)
+        browse_btn = QPushButton(" Parcourir...")
+        browse_btn.setIcon(get_icon("folder_open", color=DEFAULT_ICON_COLOR))
+        browse_btn.clicked.connect(self._browse_download_dir)
+        dl_row.addWidget(browse_btn)
+        layout.addLayout(dl_row)
+
+        # 7. Vitesse de téléchargement max
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(QLabel("Limitation de vitesse de téléchargement :"))
+        self.speed_combo = QComboBox()
+        self.speed_combo.addItem("Illimitée", 0)
+        self.speed_combo.addItem("1.5 Mo/s", 1500 * 1024)
+        self.speed_combo.addItem("3.0 Mo/s", 3000 * 1024)
+        self.speed_combo.addItem("5.0 Mo/s", 5000 * 1024)
+        self.speed_combo.addItem("10.0 Mo/s", 10000 * 1024)
+        cur_spd = getattr(self.settings, "download_speed_limit", 0)
+        s_idx = 0
+        for i in range(self.speed_combo.count()):
+            if self.speed_combo.itemData(i) == cur_spd:
+                s_idx = i
+                break
+        self.speed_combo.setCurrentIndex(s_idx)
+        speed_row.addWidget(self.speed_combo)
+        layout.addLayout(speed_row)
+
         # Nettoyage du cache
         cache_row = QHBoxLayout()
         cache_row.addWidget(QLabel("Gestion du stockage local :"))
@@ -110,6 +142,14 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(btn_row)
 
+    def _browse_download_dir(self):
+        from PyQt6.QtWidgets import QFileDialog
+        from core.download_manager import get_default_download_dir
+        curr = self.dl_input.text().strip() or get_default_download_dir()
+        selected = QFileDialog.getExistingDirectory(self, "Sélectionner le dossier de téléchargement", curr)
+        if selected:
+            self.dl_input.setText(selected)
+
     def _clear_cache(self):
         from core.database import get_cache_dir
         import shutil
@@ -125,6 +165,15 @@ class SettingsDialog(QDialog):
         self.settings.buffer_size_mb = self.buf_slider.value()
         self.settings.deinterlace = self.deinterlace_cb.isChecked()
         self.settings.cache_logos = self.cache_logos_cb.isChecked()
+        if hasattr(self, "dl_input"):
+            self.settings.download_dir = self.dl_input.text().strip()
+        if hasattr(self, "speed_combo"):
+            self.settings.download_speed_limit = self.speed_combo.currentData() or 0
 
         self.db.save_settings(self.settings)
+        try:
+            from core.download_manager import DownloadManager
+            DownloadManager.instance().set_speed_limit(getattr(self.settings, "download_speed_limit", 0))
+        except Exception:
+            pass
         self.accept()

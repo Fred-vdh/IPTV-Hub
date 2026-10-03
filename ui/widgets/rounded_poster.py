@@ -46,6 +46,13 @@ class RoundedPosterLabel(QLabel):
         self.stream_type = stream_type
         self.update()
 
+    def set_pixmap(self, pixmap):
+        """Alias pythonique pour setPixmap."""
+        if pixmap is not None:
+            self.setPixmap(pixmap)
+        else:
+            self.clear()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)

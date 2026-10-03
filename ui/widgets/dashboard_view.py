@@ -25,6 +25,7 @@ from PyQt6.QtGui import (
 from core.database import Database
 from core.models import Channel, Playlist, parse_movie_metadata
 from core.image_loader import ImageLoader
+from core.download_manager import DownloadManager, DownloadItem
 from ui.icons import get_icon
 from ui.widgets.poster_utils import draw_added_date_badge
 from core.i18n import tr
@@ -923,6 +924,131 @@ class HorizontalCarouselScrollArea(QScrollArea):
             super().wheelEvent(event)
 
 
+class DashboardDownloadCard(QWidget):
+    """Carte poster verticale 140x258 px représentant un téléchargement terminé (hors-ligne)."""
+    clicked = pyqtSignal(object)
+
+    CARD_WIDTH = 140
+    POSTER_HEIGHT = 210
+    TOTAL_HEIGHT = 258
+
+    def __init__(self, item: DownloadItem, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.item = item
+        self.pixmap: Optional[QPixmap] = None
+        self.is_hovered = False
+
+        self.setFixedSize(self.CARD_WIDTH, self.TOTAL_HEIGHT)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._load_image()
+
+    def _load_image(self):
+        if not self.item.poster_url:
+            return
+        loader = ImageLoader.instance()
+        cached = loader.get_cached_image(self.item.poster_url)
+        if cached:
+            self.pixmap = cached
+            self.update()
+        else:
+            loader.image_loaded.connect(self._on_image_loaded)
+            loader.request_image(self.item.poster_url)
+
+    def _on_image_loaded(self, url: str, pixmap: QPixmap):
+        if url == self.item.poster_url:
+            self.pixmap = pixmap
+            self.update()
+
+    def enterEvent(self, event):
+        self.is_hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.is_hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self.item)
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+
+        p_rect = QRectF(0.0, 0.0, float(self.CARD_WIDTH), float(self.POSTER_HEIGHT))
+        path = QPainterPath()
+        path.addRoundedRect(p_rect, 10.0, 10.0)
+
+        painter.save()
+        painter.setClipPath(path)
+        painter.fillRect(p_rect.toRect(), QColor("#131b2e"))
+
+        if self.pixmap and not self.pixmap.isNull():
+            scaled = self.pixmap.scaled(
+                self.CARD_WIDTH, self.POSTER_HEIGHT,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            crop_x = (scaled.width() - self.CARD_WIDTH) // 2
+            crop_y = (scaled.height() - self.POSTER_HEIGHT) // 2
+            painter.drawPixmap(0, 0, scaled, crop_x, crop_y, self.CARD_WIDTH, self.POSTER_HEIGHT)
+        else:
+            painter.setPen(QColor("#334155"))
+            font = QFont("Segoe UI", 9)
+            painter.setFont(font)
+            painter.drawText(p_rect.toRect(), Qt.AlignmentFlag.AlignCenter, tr("Affiche"))
+        painter.restore()
+
+        # Bordure et survol
+        painter.save()
+        border_color = QColor("#38bdf8") if self.is_hovered else QColor(255, 255, 255, 30)
+        border_w = 2 if self.is_hovered else 1
+        painter.setPen(QPen(border_color, border_w))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(p_rect.adjusted(0.5, 0.5, -0.5, -0.5), 10.0, 10.0)
+        painter.restore()
+
+        # Badge HORS LIGNE
+        painter.save()
+        badge_text = tr("✓ HORS LIGNE")
+        font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+        painter.setFont(font)
+        bw = painter.fontMetrics().horizontalAdvance(badge_text) + 12
+        bh = 17
+        bx = 6
+        by = 6
+        painter.setBrush(QColor(6, 78, 59, 230))
+        painter.setPen(QPen(QColor("#059669"), 1))
+        painter.drawRoundedRect(QRect(bx, by, bw, bh), 4, 4)
+        painter.setPen(QColor("#34d399"))
+        painter.drawText(QRect(bx, by, bw, bh), Qt.AlignmentFlag.AlignCenter, badge_text)
+        painter.restore()
+
+        # Titre
+        painter.save()
+        t_rect = QRect(0, self.POSTER_HEIGHT + 6, self.CARD_WIDTH, 18)
+        font = QFont("Segoe UI", 8, QFont.Weight.DemiBold if not self.is_hovered else QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.setPen(QColor("#ffffff" if self.is_hovered else "#cbd5e1"))
+        elided = painter.fontMetrics().elidedText(self.item.title, Qt.TextElideMode.ElideRight, self.CARD_WIDTH)
+        painter.drawText(t_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
+
+        # Sous-titre (Taille du fichier)
+        sub_rect = QRect(0, self.POSTER_HEIGHT + 26, self.CARD_WIDTH, 16)
+        sub_font = QFont("Segoe UI", 7)
+        painter.setFont(sub_font)
+        painter.setPen(QColor("#94a3b8"))
+        sub_info = f"{self.item.sub_title} • " if self.item.sub_title else ""
+        sub_info += f"{self.item.get_formatted_size()} • {self.item.container_extension.upper()}"
+        elided_sub = painter.fontMetrics().elidedText(sub_info, Qt.TextElideMode.ElideRight, self.CARD_WIDTH)
+        painter.drawText(sub_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_sub)
+        painter.restore()
+
+
 # =========================================================================
 # 5. CONTENEUR DE CARROUSEL HORIZONTAL AVEC EN-TÊTE
 # =========================================================================
@@ -1159,8 +1285,9 @@ class DashboardView(QWidget):
     series_selected = pyqtSignal(Channel)
     channel_selected = pyqtSignal(Channel)
     resume_playback_requested = pyqtSignal(Channel, float)  # channel, position
-    navigate_section_requested = pyqtSignal(str)           # "live", "vod", "series", "favorites", "recently_added"
+    navigate_section_requested = pyqtSignal(str)           # "live", "vod", "series", "favorites", "recently_added", "downloads"
     playlist_switched = pyqtSignal(Playlist)
+    download_selected = pyqtSignal(object)                 # DownloadItem
 
     def __init__(self, db: Database, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -1249,6 +1376,12 @@ class DashboardView(QWidget):
         self.sec_recents = DashboardSection(tr("Récemment ajoutés"), "recently_added", see_all_str, content_height=262, parent=self.container_widget)
         self.sec_recents.see_all_clicked.connect(self.navigate_section_requested.emit)
         self.container_layout.addWidget(self.sec_recents)
+
+        # 6. Section "Téléchargements" (affichée juste en dessous de Récemment ajoutés)
+        self.sec_downloads = DashboardSection(tr("Téléchargements"), "downloads", see_all_str, content_height=262, parent=self.container_widget)
+        self.sec_downloads.see_all_clicked.connect(self.navigate_section_requested.emit)
+        self.sec_downloads.setVisible(False)
+        self.container_layout.addWidget(self.sec_downloads)
 
         self.main_scroll.setWidget(self.container_widget)
         root_layout.addWidget(self.main_scroll)
@@ -1368,6 +1501,20 @@ class DashboardView(QWidget):
         else:
             self.sec_recents.setVisible(False)
 
+        # 5. Téléchargements terminés (hors-ligne)
+        completed_downloads = DownloadManager.instance().get_completed_downloads()
+        self.sec_downloads.clear_items()
+        self.sec_downloads.set_badge_count(len(completed_downloads))
+        self.sec_downloads.set_see_all_text(tr("Voir les {count} >", count=len(completed_downloads)) if completed_downloads else (tr("Voir tout") + " >"))
+        if completed_downloads:
+            self.sec_downloads.setVisible(True)
+            for dl_item in completed_downloads:
+                dl_card = DashboardDownloadCard(dl_item, parent=self.sec_downloads.items_container)
+                dl_card.clicked.connect(self.download_selected.emit)
+                self.sec_downloads.add_item(dl_card)
+        else:
+            self.sec_downloads.setVisible(False)
+
     def _on_channel_clicked(self, channel: Channel):
         if channel.stream_type in ("movie", "vod"):
             self.movie_selected.emit(channel)
@@ -1387,6 +1534,8 @@ class DashboardView(QWidget):
             self.sec_new_episodes.filter_items(q)
         self.sec_favs.filter_items(q)
         self.sec_recents.filter_items(q)
+        if hasattr(self, "sec_downloads"):
+            self.sec_downloads.filter_items(q)
 
         if hasattr(self, "hero_banner") and hasattr(self.hero_banner, "channel"):
             hero_ch = self.hero_banner.channel
@@ -1421,6 +1570,10 @@ class DashboardView(QWidget):
         if hasattr(self, "sec_recents"):
             self.sec_recents.title_label.setText(tr("Récemment ajoutés"))
             self.sec_recents.set_see_all_text(see_all_str)
+
+        if hasattr(self, "sec_downloads"):
+            self.sec_downloads.title_label.setText(tr("Téléchargements"))
+            self.sec_downloads.set_see_all_text(see_all_str)
 
         self.refresh_view()
 

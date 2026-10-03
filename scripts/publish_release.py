@@ -37,34 +37,43 @@ def main():
         'User-Agent': 'IPTV-Hub-Release-Script'
     }
 
-    # 2. Création de la Release v2.2.2
-    release_body = """## 🚀 IPTV Hub v2.2.2 - Listes personnalisées, synchronisation QR et confort de lecture
+    from core.version import __version__
+    tag_name = f"v{__version__}"
 
-Bienvenue dans la version **2.2.2** d'**IPTV Hub**, le lecteur multimédia IPTV & VOD moderne et réactif propulsé nativement par PyQt6 et libmpv !
+    # 2. Création de la Release v2.3.0
+    release_body = f"""## 🚀 IPTV Hub {tag_name} - Gestionnaire de téléchargements VOD & Séries, chapitrage interactif et confort de lecture
+
+Bienvenue dans la version **{__version__}** d'**IPTV Hub**, le lecteur multimédia IPTV & VOD moderne, rapide et élégant propulsé nativement par PyQt6 et libmpv !
 
 ---
 
 ### ✨ Nouveautés & Améliorations de cette version :
 
-1. **Listes de chaînes personnalisées** :
-   - Créez et gérez vos bouquets de chaînes sur-mesure (ex: *Salon HD*, *Van SD*, *Sport*, *Enfants*).
-   - Intégration ergonomique dans la fenêtre de gestion et de filtrage des catégories (réservée au direct).
-   - Tri naturel automatique respectant l'ordre TNT et de la playlist d'origine.
-   - Possibilité de renommer et supprimer vos listes personnalisées en un clic.
+1. **📥 Gestionnaire de Téléchargements VOD & Séries (Mode Hors-ligne)** :
+   - Enregistrez vos films et séries préférés en un clic directement depuis leur fiche de détails.
+   - File d'attente FIFO intelligente (un seul flux simultané pour préserver votre abonnement IPTV).
+   - Reprise automatique des téléchargements interrompus via requêtes `HTTP Range`.
+   - Nouvelle section dédiée **Téléchargements** dans la barre latérale sous *Récemment ajouté*, avec onglets *En cours* et *Terminés*.
+   - Choix du dossier de destination des vidéos et limitation optionnelle du débit dans les Paramètres (*Données & Téléchargements*).
+   - Débit de téléchargement optimisé (chunks 128 Ko et régulation fine de bande passante).
 
-2. **Synchronisation locale par QR Code & Auto-sync** :
-   - Partagez vos listes, favoris, historique et listes personnalisées entre appareils en scannant un QR code sur votre réseau local.
-   - Serveur de synchronisation léger intégré et mécanisme d'auto-synchronisation.
+2. **🎞️ Chapitrage & Marqueurs interactifs sur la timeline vidéo** :
+   - Détection et extraction automatique des chapitres intégrés aux conteneurs vidéo (MKV, MP4).
+   - Marqueurs visuels discrets sur la barre de progression respectant fidèlement la charte graphique.
+   - Infobulles ergonomiques au survol affichant le titre du chapitre et le timer précis, sans aucun scintillement d'affichage.
 
-3. **Confort de visionnage & Séries** :
-   - **Détection des génériques (IntroDB)** : Bouton discret permettant de sauter l'intro en un clic ou de manière automatique.
-   - **Enchaînement automatique** (*Auto-Play*) de l'épisode suivant avec overlay interactif.
-   - Amélioration de la gestion des sous-titres et des flux audio multilingues.
+3. **📻 Filtrage des catégories & Radios fiabilisé** :
+   - Sauvegarde pérenne des sélections de catégories dans la boîte de dialogue de gestion des catégories.
+   - Prise en charge complète des bouquets de stations de radios en direct sans réinitialisation involontaire.
 
-4. **Corrections & Optimisations d'interface** :
-   - Exclusion stricte des listes personnalisées lors du filtrage des films ou séries pour un affichage et chargement instantanés.
-   - Correction de la redirection *"Voir tout >"* au-dessus de *Reprendre la lecture* vers la section *Récemment regardé*.
-   - Palette de couleurs Slate Blue-Grey cohérente dans l'ensemble des boîtes de dialogue.
+4. **🎬 Ergonomie des fiches de détails & Reprise de lecture** :
+   - Fiches de films et séries : suppression des boutons redondants pour une interface épurée (*Reprendre du début* unique et clair).
+   - Curseur contextuel optimisé (main cliquable uniquement sur les éléments interactifs).
+   - Masquage automatique des bandes-annonces pendant la lecture vidéo pour économiser les ressources.
+
+5. **⚡ Optimisations sous le capot & Stabilité** :
+   - Résolution de conflits de signaux Qt sous Windows et fiabilisation des threads de fond.
+   - Mises à jour des traductions françaises et anglaises.
 
 ---
 
@@ -75,9 +84,9 @@ Bienvenue dans la version **2.2.2** d'**IPTV Hub**, le lecteur multimédia IPTV 
 """
 
     release_data = {
-        'tag_name': 'v2.2.2',
+        'tag_name': tag_name,
         'target_commitish': 'main',
-        'name': 'IPTV Hub v2.2.2',
+        'name': f'IPTV Hub {tag_name}',
         'body': release_body,
         'draft': False,
         'prerelease': False
@@ -98,7 +107,7 @@ Bienvenue dans la version **2.2.2** d'**IPTV Hub**, le lecteur multimédia IPTV 
         print(f"Erreur API GitHub lors de la création de la release : {err_msg}")
         # Si la release existe déjà pour ce tag, tenter de la récupérer
         req_get = urllib.request.Request(
-            f"https://api.github.com/repos/{repo}/releases/tags/v2.2.2",
+            f"https://api.github.com/repos/{repo}/releases/tags/{tag_name}",
             headers=headers
         )
         with urllib.request.urlopen(req_get) as resp_get:
@@ -157,7 +166,7 @@ Bienvenue dans la version **2.2.2** d'**IPTV Hub**, le lecteur multimédia IPTV 
             asset_info = json.loads(u_resp.read().decode('utf-8'))
             print(f"-> {filename} téléversé avec succès ({asset_info.get('state')})")
 
-    print("\n[OK] Publication de la Release GitHub v2.1.6 terminee avec succes !")
+    print(f"\n[OK] Publication de la Release GitHub {tag_name} terminée avec succès !")
 
 
 if __name__ == "__main__":

@@ -62,6 +62,106 @@ class TestCategoryFiltering(unittest.TestCase):
         self.assertIn("Films FR", group_names)
         self.assertNotIn("Films IT", group_names)
 
+    def test_category_auto_selection_and_partial_channel_filtering(self):
+        import sys
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import Qt
+        from ui.dialogs.manage_categories_dialog import ManageCategoriesDialog
+
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication(sys.argv)
+
+        # 1. Créer une catégorie de radios désactivée par défaut
+        r1 = Channel(playlist_id=self.pl_id, name="France Inter", stream_url="http://radio/inter", stream_id="r1", group_title="RADIOS", stream_type="live", is_enabled=0)
+        r2 = Channel(playlist_id=self.pl_id, name="Fun Radio", stream_url="http://radio/fun", stream_id="r2", group_title="RADIOS", stream_type="live", is_enabled=0)
+        r3 = Channel(playlist_id=self.pl_id, name="Skyrock", stream_url="http://radio/sky", stream_id="r3", group_title="RADIOS", stream_type="live", is_enabled=0)
+        self.db.save_channels_batch(self.pl_id, [r1, r2, r3])
+        self.db.save_groups_enabled_status(self.pl_id, "live", disabled_groups=["RADIOS"], enabled_groups=[])
+
+        # 2. Ouvrir le dialogue
+        dlg = ManageCategoriesDialog(self.db, playlist_id=self.pl_id, stream_type="live")
+
+        # Trouver la catégorie RADIOS
+        tree = dlg.tree_widget
+        cat_item = None
+        for i in range(tree.topLevelItemCount()):
+            item = tree.topLevelItem(i)
+            if "RADIOS" in item.text(0):
+                cat_item = item
+                break
+
+        self.assertIsNotNone(cat_item)
+        # Initialement non cochée
+        self.assertEqual(cat_item.checkState(0), Qt.CheckState.Unchecked)
+        self.assertEqual(cat_item.childCount(), 3)
+
+        # 3. Cocher UNIQUEMENT "France Inter"
+        ch0 = cat_item.child(0)
+        self.assertEqual(ch0.text(0), "France Inter")
+        ch0.setCheckState(0, Qt.CheckState.Checked)
+
+        # La catégorie doit devenir automatiquement COCHÉE (Checked), avec le compteur (1/3)
+        self.assertEqual(cat_item.checkState(0), Qt.CheckState.Checked)
+        self.assertIn("1/3", cat_item.text(0))
+
+        # Les autres chaînes doivent rester NON cochées
+        self.assertEqual(cat_item.child(1).checkState(0), Qt.CheckState.Unchecked)
+        self.assertEqual(cat_item.child(2).checkState(0), Qt.CheckState.Unchecked)
+
+        # 4. Sauvegarder
+        dlg._save_and_accept()
+
+        # 5. Vérifier en base :
+        # - "RADIOS" n'est plus dans persistent_disabled_groups
+        dis_groups = self.db.get_disabled_groups(self.pl_id, "live")
+        self.assertNotIn("RADIOS", dis_groups)
+
+        # - Seule France Inter est is_enabled=1
+        enabled_channels = self.db.get_channels(self.pl_id, group_title="RADIOS", only_enabled=True)
+        self.assertEqual(len(enabled_channels), 1)
+        self.assertEqual(enabled_channels[0].name, "France Inter")
+
+        # - Les 2 autres sont bien désactivées
+        all_channels = self.db.get_channels(self.pl_id, group_title="RADIOS", only_enabled=False)
+        self.assertEqual(len(all_channels), 3)
+        ch_map = {c.name: c.is_enabled for c in all_channels}
+        self.assertTrue(ch_map["France Inter"])
+        self.assertFalse(ch_map["Fun Radio"])
+        self.assertFalse(ch_map["Skyrock"])
+
+        # - get_groups retourne bien RADIOS
+        groups = self.db.get_groups(self.pl_id, stream_type="live", only_enabled=True)
+        group_names = [g[0] for g in groups]
+        self.assertIn("RADIOS", group_names)
+
+        # 6. Rouvrir le dialogue pour tester la désélection
+        dlg2 = ManageCategoriesDialog(self.db, playlist_id=self.pl_id, stream_type="live")
+        tree2 = dlg2.tree_widget
+        cat_item2 = next(tree2.topLevelItem(i) for i in range(tree2.topLevelItemCount()) if "RADIOS" in tree2.topLevelItem(i).text(0))
+        self.assertEqual(cat_item2.checkState(0), Qt.CheckState.Checked)
+        self.assertIn("1/3", cat_item2.text(0))
+
+        # Décocher France Inter -> la catégorie doit repasser en Unchecked
+        cat_item2.child(0).setCheckState(0, Qt.CheckState.Unchecked)
+        self.assertEqual(cat_item2.checkState(0), Qt.CheckState.Unchecked)
+        self.assertIn("(3)", cat_item2.text(0))
+
+        # Cocher la catégorie directement -> toutes les chaînes passent à Checked
+        cat_item2.setCheckState(0, Qt.CheckState.Checked)
+        self.assertEqual(cat_item2.child(0).checkState(0), Qt.CheckState.Checked)
+        self.assertEqual(cat_item2.child(1).checkState(0), Qt.CheckState.Checked)
+        self.assertEqual(cat_item2.child(2).checkState(0), Qt.CheckState.Checked)
+
+        # Décocher la catégorie directement -> toutes les chaînes passent à Unchecked
+        cat_item2.setCheckState(0, Qt.CheckState.Unchecked)
+        self.assertEqual(cat_item2.child(0).checkState(0), Qt.CheckState.Unchecked)
+        self.assertEqual(cat_item2.child(1).checkState(0), Qt.CheckState.Unchecked)
+        self.assertEqual(cat_item2.child(2).checkState(0), Qt.CheckState.Unchecked)
+
+        dlg.deleteLater()
+        dlg2.deleteLater()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -224,33 +224,9 @@ class MovieDetailsDialog(QDialog):
 
         actions_layout.addStretch()
 
-        # 3. Bouton Annuler la reprise (si reprise disponible)
+        # 3. Bouton Recommencer du début (si reprise disponible)
         if self.resume_pos > 0:
-            self.clear_resume_btn = QPushButton("  Annuler reprise")
-            self.clear_resume_btn.setIcon(get_icon("restart_alt", color="#f87171"))
-            self.clear_resume_btn.setIconSize(QSize(16, 16))
-            self.clear_resume_btn.setToolTip("Efface le point de reprise et remet la barre de progression à zéro")
-            self.clear_resume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.clear_resume_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #1e293b;
-                    color: #f87171;
-                    border: 1px solid #7f1d1d;
-                    border-radius: 6px;
-                    padding: 8px 14px;
-                    font-size: 12px;
-                    font-weight: 600;
-                }
-                QPushButton:hover {
-                    background-color: #991b1b;
-                    color: #ffffff;
-                }
-            """)
-            self.clear_resume_btn.clicked.connect(self._on_clear_resume)
-            actions_layout.addWidget(self.clear_resume_btn)
-
-            # 4. Bouton Recommencer du début
-            self.restart_btn = QPushButton("  Du début")
+            self.restart_btn = QPushButton("  Reprendre du début")
             self.restart_btn.setIcon(get_icon("replay", color="#cbd5e1"))
             self.restart_btn.setIconSize(QSize(16, 16))
             self.restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -272,7 +248,7 @@ class MovieDetailsDialog(QDialog):
             self.restart_btn.clicked.connect(self._on_restart)
             actions_layout.addWidget(self.restart_btn)
 
-        # 5. Bouton Principal (Reprendre ou Regarder)
+        # 4. Bouton Principal (Reprendre ou Regarder)
         if self.resume_pos > 0:
             play_text = f"  Reprendre à {format_seconds(self.resume_pos)}"
         else:
@@ -318,16 +294,6 @@ class MovieDetailsDialog(QDialog):
             }
         """)
 
-    def _on_clear_resume(self):
-        self.db.clear_playback_progress(self.channel.id, self.channel.stream_url)
-        self.resume_pos = 0.0
-        self.play_btn.setText("  Regarder le film")
-        if hasattr(self, "restart_btn") and self.restart_btn:
-            self.restart_btn.hide()
-        if hasattr(self, "clear_resume_btn") and self.clear_resume_btn:
-            self.clear_resume_btn.hide()
-        self.progress_cleared.emit(self.channel)
-
     def _on_download(self):
         settings = self.db.get_settings()
         dest_dir = settings.download_dir or get_default_download_dir()
@@ -367,8 +333,10 @@ class MovieDetailsDialog(QDialog):
             headers=headers
         )
         self.download_task.progress.connect(self._on_download_progress)
-        self.download_task.finished.connect(self._on_download_finished)
-        self.download_task.error.connect(self._on_download_error)
+        if hasattr(self.download_task, "download_finished"):
+            self.download_task.download_finished.connect(self._on_download_finished)
+        if hasattr(self.download_task, "download_error"):
+            self.download_task.download_error.connect(self._on_download_error)
 
     def _on_download_progress(self, downloaded: int, total: int, speed: str):
         if total > 0:
@@ -485,6 +453,7 @@ class MovieDetailsDialog(QDialog):
 
     def _on_restart(self):
         self.db.clear_playback_progress(self.channel.id, self.channel.stream_url)
+        self.progress_cleared.emit(self.channel)
         self.accept()
         self.play_requested.emit(self.channel, 0.0)
 

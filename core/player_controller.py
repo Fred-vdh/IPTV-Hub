@@ -126,6 +126,7 @@ class PlayerController(QObject):
     volume_changed = pyqtSignal(int)         # 0 - 100
     mute_changed = pyqtSignal(bool)          # True / False
     tracks_changed = pyqtSignal(list)        # Liste des pistes audio / sous-titres
+    chapters_changed = pyqtSignal(list)      # Liste des chapitres [{'title': ..., 'time': ...}]
     error_occurred = pyqtSignal(str)         # Message d'erreur
     aspect_ratio_changed = pyqtSignal(str)   # '16:9', '4:3', etc.
     audio_preference_changed = pyqtSignal(str)      # 'fra', 'eng', etc.
@@ -347,6 +348,7 @@ class PlayerController(QObject):
             self._player.observe_property("volume", self._on_volume_changed)
             self._player.observe_property("mute", self._on_mute_changed)
             self._player.observe_property("track-list", self._on_track_list)
+            self._player.observe_property("chapter-list", self._on_chapter_list)
             self._player.observe_property("sid", self._on_sid_changed)
             self._player.observe_property("aid", self._on_aid_changed)
             self._player.observe_property("paused-for-cache", self._on_paused_for_cache)
@@ -551,6 +553,36 @@ class PlayerController(QObject):
             self._auto_select_preferred_subtitles(value)
             synced_tracks = self._get_synchronized_track_list(value)
             self.tracks_changed.emit(synced_tracks)
+
+    def _on_chapter_list(self, name, value):
+        chapters = []
+        if isinstance(value, list):
+            for c in value:
+                if isinstance(c, dict) and "time" in c and c["time"] is not None:
+                    chapters.append({
+                        "title": str(c.get("title") or "").strip(),
+                        "time": float(c["time"])
+                    })
+        self.chapters_changed.emit(chapters)
+
+    def get_chapters(self) -> list:
+        if not self._player:
+            return []
+        try:
+            raw = getattr(self._player, "chapter_list", None)
+            if raw is None and hasattr(self._player, "__getitem__"):
+                try:
+                    raw = self._player["chapter-list"]
+                except Exception:
+                    pass
+            if isinstance(raw, list):
+                return [{
+                    "title": str(c.get("title") or "").strip(),
+                    "time": float(c.get("time", 0.0))
+                } for c in raw if isinstance(c, dict) and "time" in c and c["time"] is not None]
+        except Exception:
+            pass
+        return []
 
     def _auto_select_preferred_audio(self, tracks: list):
         """Sélectionne intelligemment la piste audio correspondant à la langue préférée."""
@@ -763,6 +795,7 @@ class PlayerController(QObject):
         self._stall_start_monotonic = None
         self._stream_watchdog.start()
         self._stall_monitor.start()
+        self.chapters_changed.emit([])
         self._set_state("buffering")
 
         try:
@@ -864,6 +897,7 @@ class PlayerController(QObject):
                 self._set_state("stopped")
                 self.time_changed.emit(0.0)
                 self.duration_changed.emit(0.0)
+                self.chapters_changed.emit([])
             except Exception:
                 pass
         self._is_stopping = False

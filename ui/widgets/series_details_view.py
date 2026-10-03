@@ -126,6 +126,7 @@ class EpisodeCardWidget(QWidget):
     """Carte d'épisode avec vignette 16:9, bouton cliquable de validation 'Vu / Terminé', barre de progression et métadonnées."""
     clicked = pyqtSignal(dict, str)  # (episode_dict, season_num)
     toggle_watched_clicked = pyqtSignal(dict, str)  # (episode_dict, season_num)
+    download_clicked = pyqtSignal(dict, str)        # (episode_dict, season_num)
 
     CARD_WIDTH = 220
     THUMB_HEIGHT = 124
@@ -374,6 +375,30 @@ class EpisodeCardWidget(QWidget):
             if (is_over_thumb and not self._get_check_rect().contains(thumb_pos)) or is_over_title:
                 self.clicked.emit(self.episode, self.season_num)
         super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event):
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1e293b;
+                color: #f8fafc;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 4px 0px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #3b82f6;
+            }
+        """)
+        action_dl = menu.addAction(tr("Télécharger cet épisode"))
+        action_dl.setIcon(get_icon("file_download", color="#38bdf8"))
+        res = menu.exec(event.globalPos())
+        if res == action_dl:
+            self.download_clicked.emit(self.episode, self.season_num)
 
     def _paint_thumbnail(self, event):
         painter = QPainter(self.thumb_container)
@@ -1805,7 +1830,50 @@ class SeriesDetailsView(QWidget):
             )
             card.clicked.connect(self._on_episode_card_clicked)
             card.toggle_watched_clicked.connect(self._on_episode_toggle_watched)
+            card.download_clicked.connect(self._on_episode_download_clicked)
             self.episodes_grid.addWidget(card, row, col, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+    def _on_episode_download_clicked(self, ep_dict: Dict[str, Any], season_num: str):
+        """Lance le téléchargement d'un épisode de série via le DownloadManager."""
+        if not self.channel or not self.playlist:
+            return
+        from core.download_manager import DownloadManager, DownloadItem
+        client = XtreamClient(
+            server_url=self.playlist.server_url,
+            username=self.playlist.username,
+            password=self.playlist.password,
+            user_agent=self.channel.user_agent or getattr(self.playlist, "user_agent", "") or getattr(self.db.get_settings(), "user_agent", "")
+        )
+        curr_ep_id = str(ep_dict.get("id", ""))
+        curr_ext = str(ep_dict.get("container_extension", "mp4")).strip(".") or "mp4"
+        curr_ep_num = ep_dict.get("episode_num", 1)
+        curr_ep_title = (ep_dict.get("title") or tr("Épisode {num}", num=curr_ep_num)).strip()
+        stream_url = client.get_episode_stream_url(curr_ep_id, container_extension=curr_ext)
+        thumb_url = ep_dict.get("info", {}).get("movie_image") or self.channel.logo_url
+
+        try:
+            s_int = int(season_num)
+        except Exception:
+            s_int = 1
+        try:
+            ep_int = int(curr_ep_num)
+        except Exception:
+            ep_int = 1
+
+        sub_title = f"S{s_int:02d}E{ep_int:02d} : {curr_ep_title}"
+        item = DownloadItem(
+            id=f"series_{self.channel.stream_id}_{curr_ep_id}",
+            stream_id=curr_ep_id,
+            title=self.channel.name,
+            sub_title=sub_title,
+            poster_url=thumb_url,
+            stream_url=stream_url,
+            stream_type="series",
+            season_number=s_int,
+            episode_number=ep_int,
+            container_extension=curr_ext
+        )
+        DownloadManager.instance().enqueue_download(item)
 
     def _on_episode_toggle_watched(self, ep_dict: Dict[str, Any], season_num: str):
         """Bascule manuellement le statut d'un épisode entre 'lu / terminé (100%)' et 'non vu (0%)'."""

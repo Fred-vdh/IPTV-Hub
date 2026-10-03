@@ -2212,6 +2212,11 @@ class Database:
                 settings.window_fullscreen = data["window_fullscreen"].lower() == "true"
             if "download_dir" in data:
                 settings.download_dir = data["download_dir"]
+            if "download_speed_limit" in data:
+                try:
+                    settings.download_speed_limit = int(data["download_speed_limit"])
+                except (ValueError, TypeError):
+                    settings.download_speed_limit = 0
             if "sync_enabled" in data:
                 settings.sync_enabled = data["sync_enabled"].lower() == "true"
             if "sync_folder" in data:
@@ -2270,6 +2275,7 @@ class Database:
                 "window_maximized": str(settings.window_maximized),
                 "window_fullscreen": str(settings.window_fullscreen),
                 "download_dir": settings.download_dir,
+                "download_speed_limit": str(settings.download_speed_limit),
                 "sync_enabled": str(settings.sync_enabled),
                 "sync_folder": settings.sync_folder,
                 "sync_last_timestamp": settings.sync_last_timestamp,

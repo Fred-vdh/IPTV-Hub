@@ -149,6 +149,7 @@ class MPVVideoWidget(QWidget):
         self.player.volume_changed.connect(self.controls.set_volume_ui)
         self.player.mute_changed.connect(self.controls.set_mute_ui)
         self.player.tracks_changed.connect(self.controls.set_tracks)
+        self.player.chapters_changed.connect(self.controls.set_chapters)
 
         # Connexion des contrôles OSD vers le PlayerController
         self.controls.play_pause_clicked.connect(self._trigger_play_pause)
@@ -355,7 +356,23 @@ class MPVVideoWidget(QWidget):
             # Laisser Qt distribuer les clics, pressions et survols naturellement aux boutons sans aucune interception !
             return False
 
+        if event_type == QEvent.Type.ToolTip:
+            if hasattr(watched, "toolTip") and hasattr(self, "controls") and self.controls:
+                tip_text = watched.toolTip()
+                if tip_text:
+                    pos = getattr(event, "pos", lambda: None)()
+                    self.controls.show_custom_tooltip(watched, tip_text, pos=pos)
+                    return True
+
         if event_type in (QEvent.Type.MouseMove, QEvent.Type.HoverMove):
+            if hasattr(self, "controls") and self.controls and hasattr(self.controls, "osd_tooltip"):
+                if self.controls.osd_tooltip.isVisible() and watched == getattr(self.controls, "timeline_slider", None):
+                    pos = getattr(event, "position", None)
+                    qpos = pos().toPoint() if pos else getattr(event, "pos", lambda: None)()
+                    tip = watched.toolTip()
+                    if tip:
+                        self.controls.show_custom_tooltip(watched, tip, pos=qpos)
+
             if isinstance(event, QMouseEvent):
                 global_pos = event.globalPosition().toPoint()
             else:
@@ -384,6 +401,8 @@ class MPVVideoWidget(QWidget):
                         self._show_osd()
 
         elif event_type == QEvent.Type.Leave:
+            if hasattr(self, "controls") and self.controls:
+                self.controls.hide_custom_tooltip()
             self.show_mouse_cursor()
             if getattr(self, "_was_mouse_on_controls", False) and not self._is_mouse_on_controls_bar():
                 self._was_mouse_on_controls = False
@@ -397,6 +416,8 @@ class MPVVideoWidget(QWidget):
                 self._was_mouse_on_controls = True
 
         elif event_type == QEvent.Type.MouseButtonPress:
+            if hasattr(self, "controls") and self.controls:
+                self.controls.hide_custom_tooltip()
             if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.LeftButton:
                 global_pos = event.globalPosition().toPoint()
                 self._last_mouse_pos = global_pos

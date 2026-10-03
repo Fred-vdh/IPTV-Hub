@@ -61,7 +61,6 @@ class TestDetailsCursors(unittest.TestCase):
         self.assertEqual(view.back_btn.cursor().shape(), Qt.CursorShape.PointingHandCursor)
         self.assertEqual(view.play_btn.cursor().shape(), Qt.CursorShape.PointingHandCursor)
         self.assertEqual(view.restart_btn.cursor().shape(), Qt.CursorShape.PointingHandCursor)
-        self.assertEqual(view.clear_resume_btn.cursor().shape(), Qt.CursorShape.PointingHandCursor)
         self.assertEqual(view.fav_btn.cursor().shape(), Qt.CursorShape.PointingHandCursor)
         self.assertEqual(view.download_btn.cursor().shape(), Qt.CursorShape.PointingHandCursor)
         self.assertEqual(view.trailer_thumb_label.cursor().shape(), Qt.CursorShape.PointingHandCursor)

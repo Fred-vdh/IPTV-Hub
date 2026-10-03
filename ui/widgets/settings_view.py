@@ -648,12 +648,79 @@ class SettingsView(QWidget):
         """)
         self.browse_dl_btn.clicked.connect(self._browse_download_dir)
         dl_row.addWidget(self.browse_dl_btn)
+
+        self.reset_dl_btn = QPushButton(" " + tr("Par défaut"))
+        self.reset_dl_btn.setIcon(get_icon("replay", color="#e2e8f0"))
+        self.reset_dl_btn.setIconSize(QSize(16, 16))
+        self.reset_dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reset_dl_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #20293d;
+                color: #e2e8f0;
+                border: 1px solid #303e5c;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #29354d;
+                color: #ffffff;
+            }
+        """)
+        self.reset_dl_btn.clicked.connect(lambda: self.download_dir_edit.setText(get_default_download_dir()))
+        dl_row.addWidget(self.reset_dl_btn)
         c_layout.addLayout(dl_row)
 
         sep_dl = QFrame()
         sep_dl.setFrameShape(QFrame.Shape.HLine)
         sep_dl.setStyleSheet("background-color: #20293d; margin: 10px 0px;")
         c_layout.addWidget(sep_dl)
+
+        # 2. Limitation de la vitesse de téléchargement
+        self.lbl_dl_speed = QLabel(tr("Limitation de la vitesse de téléchargement :"))
+        c_layout.addWidget(self.lbl_dl_speed)
+
+        self.download_speed_combo = QComboBox()
+        self.download_speed_combo.addItem(tr("Illimitée (Maximale)"), 0)
+        self.download_speed_combo.addItem("1.5 Mo/s", 1500 * 1024)
+        self.download_speed_combo.addItem("3.0 Mo/s", 3000 * 1024)
+        self.download_speed_combo.addItem("5.0 Mo/s", 5000 * 1024)
+        self.download_speed_combo.addItem("10.0 Mo/s", 10000 * 1024)
+        self.download_speed_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #1a2234;
+                color: #ffffff;
+                border: 1px solid #303e5c;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 13px;
+            }
+            QComboBox:hover {
+                border-color: #4f46e5;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 24px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a2234;
+                color: #ffffff;
+                selection-background-color: #4f46e5;
+                selection-color: #ffffff;
+                border: 1px solid #303e5c;
+            }
+        """)
+        c_layout.addWidget(self.download_speed_combo)
+
+        self.lbl_dl_speed_hint = QLabel(tr("Permet de brider le débit pour ne pas saturer votre connexion ou le serveur IPTV."))
+        self.lbl_dl_speed_hint.setStyleSheet("font-size: 11px; color: #94a3b8; margin-top: 2px; margin-bottom: 8px;")
+        c_layout.addWidget(self.lbl_dl_speed_hint)
+
+        sep_speed = QFrame()
+        sep_speed.setFrameShape(QFrame.Shape.HLine)
+        sep_speed.setStyleSheet("background-color: #20293d; margin: 10px 0px;")
+        c_layout.addWidget(sep_speed)
 
         # 2. Emplacement de la base SQLite
         db_path = self.db.db_path
@@ -963,6 +1030,14 @@ class SettingsView(QWidget):
         self.buffer_spin.setValue(self.settings.buffer_size_mb)
         self.auto_reconnect_cb.setChecked(getattr(self.settings, "auto_reconnect", True))
         self.download_dir_edit.setText(self.settings.download_dir or get_default_download_dir())
+        if hasattr(self, "download_speed_combo"):
+            current_speed = getattr(self.settings, "download_speed_limit", 0)
+            speed_idx = 0
+            for i in range(self.download_speed_combo.count()):
+                if self.download_speed_combo.itemData(i) == current_speed:
+                    speed_idx = i
+                    break
+            self.download_speed_combo.setCurrentIndex(speed_idx)
         self.auto_play_next_cb.setChecked(getattr(self.settings, "auto_play_next_episode", True))
         if hasattr(self, "introdb_intro_cb"):
             self.introdb_intro_cb.setChecked(getattr(self.settings, "introdb_intro_skip", True))
@@ -1046,6 +1121,8 @@ class SettingsView(QWidget):
         self.settings.user_agent = self.ua_edit.text().strip() or "Mozilla/5.0"
         self.settings.buffer_size_mb = self.buffer_spin.value()
         self.settings.download_dir = self.download_dir_edit.text().strip()
+        if hasattr(self, "download_speed_combo"):
+            self.settings.download_speed_limit = self.download_speed_combo.currentData() or 0
         self.settings.preferred_audio_lang = self.audio_lang_combo.currentData() or ""
         self.settings.auto_play_next_episode = self.auto_play_next_cb.isChecked()
         if hasattr(self, "introdb_intro_cb"):
@@ -1086,6 +1163,11 @@ class SettingsView(QWidget):
         self.settings.deinterlace = (deint_data == "yes")
 
         self.db.save_settings(self.settings)
+        try:
+            from core.download_manager import DownloadManager
+            DownloadManager.instance().set_speed_limit(getattr(self.settings, "download_speed_limit", 0))
+        except Exception:
+            pass
         self.save_status.setText("✓ " + tr("Paramètres enregistrés"))
         self.settings_saved.emit()
 
@@ -1252,6 +1334,14 @@ class SettingsView(QWidget):
             self.lbl_dl.setText(tr("Dossier de téléchargement des vidéos & films VOD :"))
         if hasattr(self, "browse_dl_btn"):
             self.browse_dl_btn.setText(" " + tr("Parcourir..."))
+        if hasattr(self, "reset_dl_btn"):
+            self.reset_dl_btn.setText(" " + tr("Par défaut"))
+        if hasattr(self, "lbl_dl_speed"):
+            self.lbl_dl_speed.setText(tr("Limitation de la vitesse de téléchargement :"))
+        if hasattr(self, "lbl_dl_speed_hint"):
+            self.lbl_dl_speed_hint.setText(tr("Permet de brider le débit pour ne pas saturer votre connexion ou le serveur IPTV."))
+        if hasattr(self, "download_speed_combo") and self.download_speed_combo.count() > 0:
+            self.download_speed_combo.setItemText(0, tr("Illimitée (Maximale)"))
         if hasattr(self, "lbl_db_path"):
             self.lbl_db_path.setText(f"<b>{tr('Base SQLite :')}</b> <span style='color: #818cf8;'>{self.db.db_path}</span>")
         if hasattr(self, "clear_cache_btn"):

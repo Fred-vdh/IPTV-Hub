@@ -82,6 +82,7 @@ hiddenimports += [
     "ui.widgets.channel_model",
     "ui.widgets.custom_titlebar",
     "ui.widgets.dashboard_view",
+    "ui.widgets.downloads_view",
     "ui.widgets.epg_grid_view",
     "ui.widgets.epg_timeline",
     "ui.widgets.epg_view",

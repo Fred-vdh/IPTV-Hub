@@ -21,11 +21,12 @@ from core.i18n import tr
 from ui.dialogs.themed_input_dialog import ThemedInputDialog
 
 
-def _get_chevron_icons():
+def _get_ui_icons():
     from core.database import get_cache_dir
     cache_dir = get_cache_dir()
     right_svg = cache_dir / "chevron_right.svg"
     down_svg = cache_dir / "chevron_down.svg"
+    check_svg = cache_dir / "check_white.svg"
     if not right_svg.exists():
         right_svg.write_text(
             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>',
@@ -36,7 +37,12 @@ def _get_chevron_icons():
             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>',
             encoding="utf-8"
         )
-    return right_svg.as_posix(), down_svg.as_posix()
+    if not check_svg.exists():
+        check_svg.write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+            encoding="utf-8"
+        )
+    return right_svg.as_posix(), down_svg.as_posix(), check_svg.as_posix()
 
 
 class KeyboardNavTreeWidget(QTreeWidget):
@@ -85,7 +91,7 @@ class ManageCategoriesDialog(QDialog):
         self.setModal(True)
         self.setObjectName("manageCategoriesDialog")
 
-        chevron_right_path, chevron_down_path = _get_chevron_icons()
+        chevron_right_path, chevron_down_path, check_white_path = _get_ui_icons()
 
         # Palette Slate Blue-Grey cohérente avec l'application (pas de fond noir pur)
         self.setStyleSheet(f"""
@@ -150,6 +156,7 @@ class ManageCategoriesDialog(QDialog):
             QTreeWidget::branch:open:has-children:has-siblings {{
                 image: url("{chevron_down_path}");
             }}
+            QTreeWidget::indicator,
             QCheckBox::indicator {{
                 width: 18px;
                 height: 18px;
@@ -157,13 +164,15 @@ class ManageCategoriesDialog(QDialog):
                 border-radius: 4px;
                 background-color: #222b3d;
             }}
+            QTreeWidget::indicator:hover,
+            QCheckBox::indicator:hover {{
+                border-color: #38bdf8;
+            }}
+            QTreeWidget::indicator:checked,
             QCheckBox::indicator:checked {{
                 background-color: #3b82f6;
                 border-color: #3b82f6;
-            }}
-            QCheckBox::indicator:indeterminate {{
-                background-color: #6366f1;
-                border-color: #6366f1;
+                image: url("{check_white_path}");
             }}
             QComboBox {{
                 background-color: #222b3d;
@@ -585,7 +594,6 @@ class ManageCategoriesDialog(QDialog):
 
         for category_name, channels in cat_items:
             cat_item = QTreeWidgetItem(self.tree_widget)
-            cat_item.setText(0, f"{clean_category_display_name(category_name)}  ({len(channels)})")
             cat_item.setData(0, Qt.ItemDataRole.UserRole, ("category", category_name))
             cat_item.setData(0, Qt.ItemDataRole.UserRole + 1, channels)
             cat_item.setFont(0, QFont("Segoe UI", 10, QFont.Weight.DemiBold))
@@ -593,10 +601,12 @@ class ManageCategoriesDialog(QDialog):
 
             total_in_cat = len(channels)
             group_disabled = (category_name in disabled_groups)
-            checked_in_cat = 0 if group_disabled else sum(1 for ch in channels if ch.is_enabled)
+            checked_in_cat = sum(1 for ch in channels if ch.is_enabled)
             self._total_channels += total_in_cat
+            cat_clean_name = clean_category_display_name(category_name)
 
             if is_vod:
+                cat_item.setText(0, f"{cat_clean_name}  ({total_in_cat})")
                 if group_disabled or checked_in_cat == 0:
                     cat_item.setCheckState(0, Qt.CheckState.Unchecked)
                 else:
@@ -606,7 +616,11 @@ class ManageCategoriesDialog(QDialog):
                 for ch in channels:
                     ch_item = QTreeWidgetItem(cat_item)
                     ch_item.setText(0, ch.name)
-                    ch_enabled = bool(ch.is_enabled and not group_disabled)
+                    if group_disabled and checked_in_cat == 0:
+                        ch_enabled = False
+                    else:
+                        ch_enabled = bool(ch.is_enabled)
+
                     ch_item.setData(0, Qt.ItemDataRole.UserRole, ("channel", ch.id, ch_enabled))
                     ch_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
 
@@ -628,12 +642,15 @@ class ManageCategoriesDialog(QDialog):
                 self._selected_channels += real_checked
                 cat_item.setData(0, Qt.ItemDataRole.UserRole + 2, total_in_cat)
 
-                if real_checked == total_in_cat and total_in_cat > 0:
+                if real_checked > 0:
                     cat_item.setCheckState(0, Qt.CheckState.Checked)
-                elif real_checked == 0 or total_in_cat == 0:
-                    cat_item.setCheckState(0, Qt.CheckState.Unchecked)
+                    if real_checked < total_in_cat:
+                        cat_item.setText(0, f"{cat_clean_name}  ({real_checked}/{total_in_cat})")
+                    else:
+                        cat_item.setText(0, f"{cat_clean_name}  ({total_in_cat})")
                 else:
-                    cat_item.setCheckState(0, Qt.CheckState.PartiallyChecked)
+                    cat_item.setCheckState(0, Qt.CheckState.Unchecked)
+                    cat_item.setText(0, f"{cat_clean_name}  ({total_in_cat})")
 
         self._block_signals = False
         self.tree_widget.setUpdatesEnabled(True)
@@ -761,12 +778,17 @@ class ManageCategoriesDialog(QDialog):
                             ch_item.setCheckState(0, Qt.CheckState.Unchecked)
 
                 total_checked += cat_checked
-                if cat_checked == child_count and child_count > 0:
+                cat_data = cat_item.data(0, Qt.ItemDataRole.UserRole)
+                cat_clean_name = clean_category_display_name(cat_data[1]) if cat_data else ""
+                if cat_checked > 0:
                     cat_item.setCheckState(0, Qt.CheckState.Checked)
-                elif cat_checked == 0:
-                    cat_item.setCheckState(0, Qt.CheckState.Unchecked)
+                    if cat_checked < child_count:
+                        cat_item.setText(0, f"{cat_clean_name}  ({cat_checked}/{child_count})")
+                    else:
+                        cat_item.setText(0, f"{cat_clean_name}  ({child_count})")
                 else:
-                    cat_item.setCheckState(0, Qt.CheckState.PartiallyChecked)
+                    cat_item.setCheckState(0, Qt.CheckState.Unchecked)
+                    cat_item.setText(0, f"{cat_clean_name}  ({child_count})")
 
             self.custom_counter_label.setText(
                 tr("{count} chaîne(s) dans cette liste", count=total_checked)
@@ -805,6 +827,8 @@ class ManageCategoriesDialog(QDialog):
                             self.db.add_channel_to_custom_list(list_id, ch)
                         else:
                             self.db.remove_channel_from_custom_list(list_id, ch)
+                cat_name = clean_category_display_name(data[1])
+                item.setText(0, f"{cat_name}  ({item.childCount()})")
 
             elif item_type == "custom_channel":
                 ch: Channel = data[1]
@@ -817,12 +841,17 @@ class ManageCategoriesDialog(QDialog):
                 if parent:
                     total_in_cat = parent.childCount()
                     checked_count = sum(1 for i in range(total_in_cat) if parent.child(i).checkState(0) == Qt.CheckState.Checked)
-                    if checked_count == total_in_cat and total_in_cat > 0:
+                    parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
+                    cat_name = clean_category_display_name(parent_data[1]) if parent_data else ""
+                    if checked_count > 0:
                         parent.setCheckState(0, Qt.CheckState.Checked)
-                    elif checked_count == 0:
-                        parent.setCheckState(0, Qt.CheckState.Unchecked)
+                        if checked_count < total_in_cat:
+                            parent.setText(0, f"{cat_name}  ({checked_count}/{total_in_cat})")
+                        else:
+                            parent.setText(0, f"{cat_name}  ({total_in_cat})")
                     else:
-                        parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+                        parent.setCheckState(0, Qt.CheckState.Unchecked)
+                        parent.setText(0, f"{cat_name}  ({total_in_cat})")
 
             self._custom_lists_modified = True
             total_checked = 0
@@ -954,6 +983,9 @@ class ManageCategoriesDialog(QDialog):
                     self._selected_channels += (new_checked - old_checked)
                     for i in range(item.childCount()):
                         item.child(i).setCheckState(0, target_state)
+
+                    cat_name = clean_category_display_name(data[1])
+                    item.setText(0, f"{cat_name}  ({item.childCount()})")
                 else:
                     if state == Qt.CheckState.Checked:
                         self._selected_channels += total_in_cat
@@ -971,12 +1003,18 @@ class ManageCategoriesDialog(QDialog):
                     else:
                         self._selected_channels = max(0, self._selected_channels - 1)
 
-                    if checked_count == total_in_cat and total_in_cat > 0:
+                    parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
+                    cat_name = clean_category_display_name(parent_data[1]) if parent_data else ""
+
+                    if checked_count > 0:
                         parent.setCheckState(0, Qt.CheckState.Checked)
-                    elif checked_count == 0:
-                        parent.setCheckState(0, Qt.CheckState.Unchecked)
+                        if checked_count < total_in_cat:
+                            parent.setText(0, f"{cat_name}  ({checked_count}/{total_in_cat})")
+                        else:
+                            parent.setText(0, f"{cat_name}  ({total_in_cat})")
                     else:
-                        parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+                        parent.setCheckState(0, Qt.CheckState.Unchecked)
+                        parent.setText(0, f"{cat_name}  ({total_in_cat})")
         finally:
             self._block_signals = False
             self.tree_widget.setUpdatesEnabled(True)
@@ -991,6 +1029,11 @@ class ManageCategoriesDialog(QDialog):
             for i in range(self.tree_widget.topLevelItemCount()):
                 cat_item = self.tree_widget.topLevelItem(i)
                 cat_item.setCheckState(0, Qt.CheckState.Checked)
+                cat_data = cat_item.data(0, Qt.ItemDataRole.UserRole)
+                if cat_data and cat_data[0] == "category":
+                    cat_name = clean_category_display_name(cat_data[1])
+                    total = cat_item.childCount() if cat_item.childCount() > 0 else (len(cat_item.data(0, Qt.ItemDataRole.UserRole + 1) or []))
+                    cat_item.setText(0, f"{cat_name}  ({total})")
                 for j in range(cat_item.childCount()):
                     cat_item.child(j).setCheckState(0, Qt.CheckState.Checked)
         finally:
@@ -1006,6 +1049,11 @@ class ManageCategoriesDialog(QDialog):
             for i in range(self.tree_widget.topLevelItemCount()):
                 cat_item = self.tree_widget.topLevelItem(i)
                 cat_item.setCheckState(0, Qt.CheckState.Unchecked)
+                cat_data = cat_item.data(0, Qt.ItemDataRole.UserRole)
+                if cat_data and cat_data[0] == "category":
+                    cat_name = clean_category_display_name(cat_data[1])
+                    total = cat_item.childCount() if cat_item.childCount() > 0 else (len(cat_item.data(0, Qt.ItemDataRole.UserRole + 1) or []))
+                    cat_item.setText(0, f"{cat_name}  ({total})")
                 for j in range(cat_item.childCount()):
                     cat_item.child(j).setCheckState(0, Qt.CheckState.Unchecked)
         finally:
@@ -1019,7 +1067,9 @@ class ManageCategoriesDialog(QDialog):
         try:
             for i in range(self.tree_widget.topLevelItemCount()):
                 cat_item = self.tree_widget.topLevelItem(i)
-                cat_matches = query in cat_item.text(0).lower()
+                data = cat_item.data(0, Qt.ItemDataRole.UserRole)
+                category_name = data[1] if (data and data[0] == "category") else ""
+                cat_matches = (query in cat_item.text(0).lower()) or (query in category_name.lower())
 
                 if cat_item.childCount() == 0:
                     cat_item.setHidden(not cat_matches)
@@ -1043,7 +1093,7 @@ class ManageCategoriesDialog(QDialog):
         total_groups = self.tree_widget.topLevelItemCount()
         for i in range(total_groups):
             cat_item = self.tree_widget.topLevelItem(i)
-            if cat_item.checkState(0) in (Qt.CheckState.Checked, Qt.CheckState.PartiallyChecked):
+            if cat_item.checkState(0) == Qt.CheckState.Checked:
                 selected_groups += 1
 
         self.counter_label.setText(
@@ -1075,11 +1125,12 @@ class ManageCategoriesDialog(QDialog):
                 category_name = data[1] if (data and data[0] == "category") else ""
 
                 if cat_item.childCount() > 0:
-                    cat_state = cat_item.checkState(0)
-                    if cat_state == Qt.CheckState.Checked:
+                    checked_count = sum(1 for j in range(cat_item.childCount()) if cat_item.child(j).checkState(0) == Qt.CheckState.Checked)
+
+                    if checked_count > 0:
                         if category_name:
                             enabled_groups.append(category_name)
-                    elif cat_state == Qt.CheckState.Unchecked:
+                    else:
                         if category_name:
                             disabled_groups.append(category_name)
 
@@ -1088,13 +1139,11 @@ class ManageCategoriesDialog(QDialog):
                         ch_data = ch_item.data(0, Qt.ItemDataRole.UserRole)
                         if ch_data and ch_data[0] == "channel":
                             channel_id = ch_data[1]
-                            initial_enabled = ch_data[2] if len(ch_data) > 2 else None
                             is_checked = (ch_item.checkState(0) == Qt.CheckState.Checked)
-                            if initial_enabled is None or is_checked != initial_enabled:
-                                if is_checked:
-                                    enabled_ids.append(channel_id)
-                                else:
-                                    disabled_ids.append(channel_id)
+                            if is_checked:
+                                enabled_ids.append(channel_id)
+                            else:
+                                disabled_ids.append(channel_id)
                 else:
                     is_checked = (cat_item.checkState(0) == Qt.CheckState.Checked)
                     if is_checked:
@@ -1104,11 +1153,11 @@ class ManageCategoriesDialog(QDialog):
                         if category_name:
                             disabled_groups.append(category_name)
 
-            if enabled_groups or disabled_groups:
-                self.db.save_groups_enabled_status(self.playlist_id, self.stream_type, disabled_groups, enabled_groups)
-
             if enabled_ids or disabled_ids:
                 self.db.save_channels_enabled_status(enabled_ids, disabled_ids)
+
+            if enabled_groups or disabled_groups:
+                self.db.save_groups_enabled_status(self.playlist_id, self.stream_type, disabled_groups, enabled_groups)
 
             if enabled_groups or disabled_groups or enabled_ids or disabled_ids or (getattr(self, "has_custom_lists", False) and self._custom_lists_modified):
                 self.categories_updated.emit()
