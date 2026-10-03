@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 from core.download_manager import (
@@ -6,6 +8,20 @@ from core.download_manager import (
 
 
 class TestDownloadManager(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.mgr = DownloadManager.instance()
+        self._orig_json_file = self.mgr._json_file
+        self.mgr._json_file = os.path.join(self.temp_dir.name, "test_downloads.json")
+        self.mgr._downloads_list.clear()
+        self.mgr._active_workers.clear()
+
+    def tearDown(self):
+        self.mgr._downloads_list.clear()
+        self.mgr._active_workers.clear()
+        self.mgr._json_file = self._orig_json_file
+        self.temp_dir.cleanup()
+
     def test_sanitize_filename(self):
         clean = sanitize_filename('Film: "L\'aventure" / Action <2024>? *')
         self.assertNotIn(":", clean)

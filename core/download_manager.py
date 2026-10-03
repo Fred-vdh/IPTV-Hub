@@ -376,6 +376,10 @@ class DownloadManager(QObject):
                                 if not has_part and not has_final:
                                     continue
 
+                            # 0. Ignorer les entrées incomplètes ou factices sans URL ni fichier
+                            if not item.stream_url and not item.local_file_path:
+                                continue
+
                             # 3. Si l'application a été fermée en cours de téléchargement
                             if item.status in (DownloadStatus.DOWNLOADING, DownloadStatus.QUEUED):
                                 item.status = DownloadStatus.PAUSED
