@@ -123,6 +123,8 @@ hiddenimports += [
     "core.version",
     "core.i18n",
     "core.xtream_client",
+    "core.qt_worker_utils",
+    "core.native_crash_log",
 ]
 
 a = Analysis(
