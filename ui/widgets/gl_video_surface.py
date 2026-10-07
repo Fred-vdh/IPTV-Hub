@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QOpenGLContext
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 
@@ -37,8 +37,12 @@ class GLVideoSurface(QOpenGLWidget):
     de Qt étant déjà validé).
     """
 
-    # Émis depuis le thread de libmpv -> traité dans le thread GUI (queued).
-    _redraw_requested = pyqtSignal()
+    # NOTE : volontairement AUCUN signal Qt dans cette classe. Le callback de mise
+    # à jour de libmpv est appelé depuis un thread interne à libmpv (thread
+    # étranger à Qt) : appeler `emit()` depuis ce thread faisait entrer Qt dans la
+    # boucle d'événements d'un thread qu'il ne gère pas. Le callback se contente
+    # donc de lever un drapeau Python, consommé par le QTimer de repeint du
+    # thread GUI.
 
     def __init__(self, parent: Optional[QOpenGLWidget] = None):
         super().__init__(parent)
@@ -60,13 +64,13 @@ class GLVideoSurface(QOpenGLWidget):
         self._has_frame: bool = False
         self._is_rendering_active: bool = False
 
-        # Le callback de libmpv (thread interne) est relayé vers le thread GUI
-        # via un signal Qt en file d'attente (thread-safe).
-        self._redraw_requested.connect(self._on_redraw_requested, Qt.ConnectionType.QueuedConnection)
+        # Drapeau levé par le callback libmpv (thread interne à libmpv) et consommé
+        # par le timer de repeint (thread GUI) : aucun appel Qt hors du thread GUI.
+        self._redraw_pending = False
 
         # Repaint périodique tant que la lecture est active : garantit que chaque
         # composition du widget redessine la dernière frame vidéo (évite les
-        # flashs noirs intermittents).
+        # flashs noirs intermittents) et sert de relais au callback de libmpv.
         self._fallback_timer = QTimer(self)
         self._fallback_timer.setInterval(33)  # ~30 fps
         self._fallback_timer.timeout.connect(self._tick)
@@ -187,20 +191,27 @@ class GLVideoSurface(QOpenGLWidget):
             self.update()
 
     def _on_mpv_update(self):
-        """Callback appelé par libmpv (thread interne). On notifie le thread GUI."""
-        self._redraw_requested.emit()
+        """Callback appelé par libmpv (thread interne à libmpv).
 
-    def _on_redraw_requested(self):
-        self.update()
+        Aucune API Qt n'est appelée ici : ni signal, ni update(). On se contente
+        de lever un drapeau Python (opération sûre vis-à-vis du GIL), que le timer
+        de repeint du thread GUI consomme au prochain passage.
+        """
+        self._redraw_pending = True
 
     def _tick(self):
         """Repaint périodique tant que le rendu est actif.
 
         On repeint systématiquement (même sans nouvelle frame) afin que chaque
         composition du widget redessine la dernière frame vidéo : c'est ce qui
-        évite les flashs noirs intermittents pendant la lecture.
+        évite les flashs noirs intermittents pendant la lecture. C'est aussi ici
+        que le drapeau levé par libmpv est consommé.
         """
-        if self._is_rendering_active and self._render_ctx is not None:
+        if self._render_ctx is None:
+            return
+        if self._redraw_pending:
+            self._redraw_pending = False
+        if self._is_rendering_active:
             self.update()
 
     # ------------------------------------------------------------- clean up

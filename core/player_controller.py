@@ -2,9 +2,12 @@
 Contrôleur de lecture vidéo basé sur libmpv et intégré avec les signaux PyQt6.
 """
 
+import collections
+import functools
 import re
+import threading
 import time
-from typing import Optional, Dict, Any, Tuple, Set, List
+from typing import Optional, Dict, Any, Tuple, Set, List, Deque
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 from core.mpv_setup import setup_mpv_environment
@@ -117,6 +120,39 @@ def parse_subtitle_preference(pref: str) -> Tuple[str, bool]:
 
 
 
+def _mpv_callback_in_qt_thread(method):
+    """Déporte dans le thread Qt toute notification émise par libmpv.
+
+    Les handlers enregistrés via ``mpv.observe_property`` sont appelés depuis le
+    thread interne de libmpv (MPVEventHandlerThread). Or leur corps manipule des
+    QTimer, émet des signaux Qt et lit/écrit des propriétés libmpv de façon
+    synchrone. Exécuté dans ce thread, cela provoque des « access violation »
+    (crash natif 0xC0000005, sans trace) : typiquement au moment de l'enchaînement
+    vers l'épisode suivant ou à l'arrêt de la lecture, quand libmpv envoie une
+    rafale d'événements (track-list, aid, sid, paused-for-cache, eof...).
+
+    On replanifie donc systématiquement le traitement dans le thread Qt du
+    contrôleur (file d'attente vidée par un QTimer, l'ordre des notifications est
+    préservé). Si l'appel provient déjà de ce thread (tests unitaires, appel
+    direct), il est exécuté immédiatement afin de conserver un comportement
+    synchrone.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        # Comparaison d'identifiants de threads PURS PYTHON : pas d'appel à
+        # QThread.currentThread() ici. Ce dernier, invoqué depuis un thread que Qt
+        # ne connaît pas, force Qt à fabriquer un QThread « adopté » à chaque
+        # notification ; on évite ainsi toute interaction Qt hors du thread GUI.
+        qt_thread_id = getattr(self, "_qt_thread_id", None)
+        if qt_thread_id is not None and threading.get_ident() != qt_thread_id:
+            self._queue_gui_call(lambda: method(self, *args, **kwargs))
+            return None
+        return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class PlayerController(QObject):
     # Signaux Qt pour notifier l'interface
     state_changed = pyqtSignal(str)          # 'playing', 'paused', 'stopped', 'buffering'
@@ -131,6 +167,11 @@ class PlayerController(QObject):
     aspect_ratio_changed = pyqtSignal(str)   # '16:9', '4:3', etc.
     audio_preference_changed = pyqtSignal(str)      # 'fra', 'eng', etc.
     subtitle_preference_changed = pyqtSignal(str, bool)  # 'fra', True/False
+
+    # File d'exécution des callbacks libmpv (voir _queue_gui_call) : remplie depuis
+    # le thread de libmpv, vidée par un QTimer dans le thread Qt. Aucune API Qt
+    # n'est appelée depuis le thread de libmpv.
+    _qt_thread_id: Optional[int] = None
 
     _is_stopping: bool = False
     _stream_has_started: bool = False
@@ -151,6 +192,7 @@ class PlayerController(QObject):
         parent: Optional[QObject] = None
     ):
         super().__init__(parent)
+        self._init_gui_dispatch()
         self._wid = wid
         # En mode "render API" (OpenGL), libmpv ne dessine pas dans une fenêtre
         # native : c'est le widget OpenGL qui rend les frames via mpv_render_context.
@@ -187,6 +229,78 @@ class PlayerController(QObject):
         self._stall_monitor.timeout.connect(self._on_stall_monitor_tick)
 
         self._init_mpv()
+
+    def _init_gui_dispatch(self) -> None:
+        """Câble la file d'exécution Qt des callbacks libmpv (voir _queue_gui_call).
+
+        Les closures issues des callbacks libmpv sont exécutées dans le thread Qt
+        du contrôleur ; elles sont ignorées dès que cleanup() a libéré le lecteur.
+
+        Aucune API Qt n'est appelée depuis le thread de libmpv : les observers
+        remplissent une file protégée par un verrou, et un QTimer du thread Qt la
+        vide. On évite ainsi le signal inter-threads (et l'appel à
+        QThread.currentThread() depuis un thread étranger à Qt, qui oblige Qt à
+        fabriquer un QThread « adopté » à chaque notification).
+        """
+        self._qt_thread_id = threading.get_ident()
+        self._gui_calls_closed = False
+        self._gui_calls: Deque[Any] = collections.deque()
+        self._gui_calls_lock = threading.Lock()
+        # 5 ms : les notifications de propriétés libmpv (time-pos, track-list,
+        # aid, sid, paused-for-cache...) restent perçues comme instantanées.
+        self._gui_pump = QTimer(self)
+        self._gui_pump.setInterval(5)
+        self._gui_pump.timeout.connect(self._drain_gui_calls)
+        self._gui_pump.start()
+
+    def _queue_gui_call(self, fn) -> None:
+        """Replanifie une closure libmpv dans le thread Qt du contrôleur."""
+        if getattr(self, "_gui_calls_closed", False):
+            return
+        queue = getattr(self, "_gui_calls", None)
+        if queue is None:
+            # Contrôleur Qt incomplet (tests) : exécution immédiate pour ne rien
+            # perdre. Ce cas ne peut pas concerner un lecteur libmpv réel, qui
+            # passe obligatoirement par __init__ et _init_gui_dispatch().
+            fn()
+            return
+        with self._gui_calls_lock:
+            queue.append(fn)
+
+    def _drain_gui_calls(self, max_calls: int = 64) -> int:
+        """Exécute dans le thread Qt les closures en attente (appelé par QTimer).
+
+        :param max_calls: nombre maximal de closures traitées par passage, afin
+            qu'une rafale d'événements libmpv ne bloque pas l'interface.
+        :return: nombre de closures exécutées (utilisé par les tests).
+        """
+        if getattr(self, "_gui_calls_closed", False):
+            queue = getattr(self, "_gui_calls", None)
+            if queue is not None:
+                with self._gui_calls_lock:
+                    queue.clear()
+            return 0
+
+        executed = 0
+        while executed < max_calls:
+            with self._gui_calls_lock:
+                if not self._gui_calls:
+                    break
+                fn = self._gui_calls.popleft()
+            try:
+                fn()
+            except Exception as exc:
+                print(f"[PlayerController] Erreur dans un callback libmpv différé : {exc}")
+            executed += 1
+        return executed
+
+    @property
+    def is_in_gui_thread(self) -> bool:
+        """True si l'appelant est dans le thread Qt d'appartenance du contrôleur."""
+        owner = getattr(self, "_qt_thread_id", None)
+        if owner is None:
+            return True
+        return threading.get_ident() == owner
 
     def _get_player_prop(self, key: str, default: Any = None) -> Any:
         """Récupère une propriété MPV de façon sécurisée (compatible MPV réel et Mock de test)."""
@@ -363,6 +477,7 @@ class PlayerController(QObject):
         if log_level in ("error", "fatal"):
             print(f"[MPV][{component}] {message.strip()}")
 
+    @_mpv_callback_in_qt_thread
     def _on_playback_time(self, name, value):
         if value is not None and float(value) >= 0:
             self._stream_has_started = True
@@ -373,6 +488,7 @@ class PlayerController(QObject):
             if not self._is_user_paused:
                 self._set_state("playing")
 
+    @_mpv_callback_in_qt_thread
     def _on_media_format(self, name, value):
         if value:
             self._stream_has_started = True
@@ -382,6 +498,7 @@ class PlayerController(QObject):
             if not self._is_user_paused:
                 self._set_state("playing")
 
+    @_mpv_callback_in_qt_thread
     def _on_paused_for_cache(self, name, value):
         """Notifié par MPV lorsque le cache réseau s'épuise ou se reconstitue."""
         if not self._current_url or not self._player:
@@ -454,6 +571,7 @@ class PlayerController(QObject):
             self.error_occurred.emit("Flux indisponible")
 
     # Observateurs MPV -> Émission de signaux Qt sécurisés multi-thread
+    @_mpv_callback_in_qt_thread
     def _on_time_pos(self, name, value):
         if value is not None:
             val = float(value)
@@ -468,6 +586,7 @@ class PlayerController(QObject):
                 self._last_time_pos_emit = val
                 self.time_changed.emit(val)
 
+    @_mpv_callback_in_qt_thread
     def _on_duration(self, name, value):
         if value is not None and value > 0:
             self._is_vod = True
@@ -476,6 +595,7 @@ class PlayerController(QObject):
             self._is_vod = False
             self.duration_changed.emit(0.0)
 
+    @_mpv_callback_in_qt_thread
     def _on_pause_changed(self, name, value):
         if value is not None:
             if value:
@@ -489,10 +609,12 @@ class PlayerController(QObject):
                 self._stall_start_monotonic = None
                 self._set_state("playing")
 
+    @_mpv_callback_in_qt_thread
     def _on_idle_changed(self, name, value):
         if value and not self._current_url:
             self._set_state("stopped")
 
+    @_mpv_callback_in_qt_thread
     def _on_eof_reached(self, name, value):
         """Fin de fichier atteinte (valable uniquement pour les contenus à durée finie).
 
@@ -524,23 +646,28 @@ class PlayerController(QObject):
         self._eof_reported = True
         self.playback_finished.emit()
 
+    @_mpv_callback_in_qt_thread
     def _on_volume_changed(self, name, value):
         if value is not None:
             self.volume_changed.emit(int(value))
 
+    @_mpv_callback_in_qt_thread
     def _on_mute_changed(self, name, value):
         if value is not None:
             self._is_muted = bool(value)
             self.mute_changed.emit(self._is_muted)
 
+    @_mpv_callback_in_qt_thread
     def _on_sid_changed(self, name, value):
         if self._player and not getattr(self, "_is_stopping", False):
             self.tracks_changed.emit(self._get_synchronized_track_list())
 
+    @_mpv_callback_in_qt_thread
     def _on_aid_changed(self, name, value):
         if self._player and not getattr(self, "_is_stopping", False):
             self.tracks_changed.emit(self._get_synchronized_track_list())
 
+    @_mpv_callback_in_qt_thread
     def _on_track_list(self, name, value):
         if value is not None and isinstance(value, list):
             has_tracks = any(t.get("type") in ("video", "audio") for t in value if isinstance(t, dict))
@@ -554,6 +681,7 @@ class PlayerController(QObject):
             synced_tracks = self._get_synchronized_track_list(value)
             self.tracks_changed.emit(synced_tracks)
 
+    @_mpv_callback_in_qt_thread
     def _on_chapter_list(self, name, value):
         chapters = []
         if isinstance(value, list):
@@ -1079,6 +1207,18 @@ class PlayerController(QObject):
 
     def cleanup(self):
         """Libère les ressources MPV à la fermeture."""
+        # Aucune closure libmpv en attente ne doit s'exécuter sur un lecteur détruit.
+        self._gui_calls_closed = True
+        pump = getattr(self, "_gui_pump", None)
+        if pump is not None:
+            try:
+                pump.stop()
+            except Exception:
+                pass
+        queue = getattr(self, "_gui_calls", None)
+        if queue is not None:
+            with self._gui_calls_lock:
+                queue.clear()
         if hasattr(self, "_stream_watchdog") and self._stream_watchdog.isActive():
             self._stream_watchdog.stop()
         if hasattr(self, "_stall_monitor") and self._stall_monitor.isActive():

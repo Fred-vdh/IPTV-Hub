@@ -383,13 +383,16 @@ class MPVOpenGLRenderContext:
 
     def free(self):
         if self._handle:
-            # On retire le callback avant de libérer pour éviter tout appel tardif.
-            self._update_cb = None
-            self._on_update = None
+            # Le thunk ctypes du callback doit rester VIVANT jusqu'à la fin de
+            # mpv_render_context_free() : libmpv peut l'appeler une dernière fois
+            # pendant la libération. Le libérer avant ferait sauter le processus
+            # dans du code déjà désalloué.
             try:
                 _mpv_render_context_free(self._handle)
             finally:
                 self._handle = None
+                self._update_cb = None
+                self._on_update = None
 
     def __del__(self):
         try:

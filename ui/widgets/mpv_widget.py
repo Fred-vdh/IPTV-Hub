@@ -20,6 +20,7 @@ from ui.icons import get_pixmap
 class MPVVideoWidget(QWidget):
     fullscreen_requested = pyqtSignal()
     play_pause_requested = pyqtSignal()
+    multiview_requested = pyqtSignal()
 
     def __init__(self, player_controller: Optional[PlayerController] = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -160,6 +161,7 @@ class MPVVideoWidget(QWidget):
         self.controls.audio_track_selected.connect(self.player.set_audio_track)
         self.controls.subtitle_track_selected.connect(self.player.set_subtitle_track)
         self.controls.fullscreen_toggled.connect(self.fullscreen_requested.emit)
+        self.controls.multiview_toggled.connect(self.multiview_requested.emit)
 
     def showEvent(self, event):
         super().showEvent(event)
