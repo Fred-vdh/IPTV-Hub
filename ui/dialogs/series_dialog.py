@@ -170,13 +170,11 @@ class SeriesEpisodesDialog(QDialog):
 
         # Charger le poster si disponible
         if self.channel.logo_url:
-            cached = ImageLoader.instance().get_cached_image(self.channel.logo_url)
-            if cached:
-                self.poster_label.setPixmap(cached)
-            else:
-                self.poster_label.clear()
-                ImageLoader.instance().image_loaded.connect(self._on_poster_loaded)
-                ImageLoader.instance().request_image(self.channel.logo_url)
+            ImageLoader.instance().load_image(
+                self.channel.logo_url,
+                self.poster_label.setPixmap,
+                target=self
+            )
         else:
             self.poster_label.clear()
 
@@ -194,10 +192,6 @@ class SeriesEpisodesDialog(QDialog):
         self._worker.finished.connect(self._on_series_data_loaded)
         self._worker.error.connect(self._on_series_data_error)
         self._worker.start()
-
-    def _on_poster_loaded(self, url: str, pixmap: QPixmap):
-        if url == self.channel.logo_url:
-            self.poster_label.setPixmap(pixmap)
 
     def _on_series_data_loaded(self, data: Dict[str, Any]):
         self.progress_bar.setVisible(False)
@@ -390,5 +384,6 @@ class SeriesEpisodesDialog(QDialog):
 
     def closeEvent(self, event):
         self.stop_worker()
+        ImageLoader.instance().cancel_target(self)
         super().closeEvent(event)
 

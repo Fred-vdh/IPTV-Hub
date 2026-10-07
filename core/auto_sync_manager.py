@@ -15,6 +15,7 @@ from core.xtream_client import XtreamClient
 from core.m3u_parser import M3UParser
 from core.epg_manager import EPGManager
 from core.i18n import tr
+from core.qt_worker_utils import is_worker_running
 
 logger = logging.getLogger(__name__)
 
@@ -136,8 +137,19 @@ class ContentSyncWorker(QThread):
             username=playlist.username,
             password=playlist.password
         )
-        self.progress.emit(tr("Connexion au serveur Xtream..."))
-        client.authenticate()
+        auth_data = client.authenticate()
+        u_info = auth_data.get("user_info", {})
+        if u_info:
+            try:
+                self.db.update_playlist_account_info(
+                    self.playlist_id,
+                    account_status=u_info.get("status"),
+                    exp_date=str(u_info.get("exp_date", "")),
+                    max_connections=str(u_info.get("max_connections", "1")),
+                    active_cons=str(u_info.get("active_cons", "0"))
+                )
+            except Exception:
+                pass
 
         # Direct
         if self.sync_type in ("live", "all"):
@@ -236,7 +248,9 @@ class AutoSyncManager(QObject):
 
     def is_running(self) -> bool:
         """Indique si une synchronisation est actuellement en cours."""
-        return self._current_worker is not None and self._current_worker.isRunning()
+        # is_worker_running ne lève jamais, même si l'objet C++ du worker a déjà
+        # été détruit par deleteLater() (sinon RuntimeError -> qFatal/abort).
+        return is_worker_running(self._current_worker)
 
     def get_due_sync_types(self, playlist_id: int) -> List[str]:
         """
@@ -333,6 +347,12 @@ class AutoSyncManager(QObject):
     def _on_worker_finished(self, sync_type: str, playlist_id: int, success: bool, message: str):
         """Réception de la fin du worker en cours, notification et transition vers la tâche suivante."""
         self.sync_finished.emit(sync_type, playlist_id, success, message)
+        # ATTENTION : `finished` est ici un signal personnalisé émis depuis run().
+        # Le thread peut donc encore tourner : on attend sa fin réelle avant libération.
+        worker = self._current_worker
+        if worker is not None:
+            worker.wait(5000)
+            worker.deleteLater()
         self._current_worker = None
         self._current_task = None
 

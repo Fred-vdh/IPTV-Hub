@@ -29,6 +29,7 @@ from core.download_manager import DownloadManager, DownloadItem
 from ui.icons import get_icon
 from ui.widgets.poster_utils import draw_added_date_badge
 from core.i18n import tr
+from core.qt_worker_utils import is_worker_running, track_worker
 
 
 class BackdropFetchThread(QThread):
@@ -63,6 +64,10 @@ class BackdropFetchThread(QThread):
                 elif isinstance(bd, str):
                     backdrop_url = bd
 
+            # Un fetch devenu obsolète (l'utilisateur a affiché un autre média)
+            # ne doit pas appliquer son résultat : sortie coopérative.
+            if self.isInterruptionRequested():
+                return
             if backdrop_url and isinstance(backdrop_url, str) and backdrop_url.strip():
                 self.backdrop_ready.emit(backdrop_url.strip())
         except Exception:
@@ -85,6 +90,8 @@ class HeroPosterWidget(QWidget):
         self.setFixedSize(self.WIDTH, self.HEIGHT)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pixmap: Optional[QPixmap] = None
+        self._scaled_pixmap: Optional[QPixmap] = None
+        self._scaled_size = None
         self.quality_tag: str = ""
         self.image_url: str = ""
         self.added_at: Optional[str] = None
@@ -96,22 +103,33 @@ class HeroPosterWidget(QWidget):
         self.added_at = added_at
         self.stream_type = stream_type
         self.pixmap = None
+        self._scaled_pixmap = None
+        self._scaled_size = None
         self.update()
 
         if image_url:
             loader = ImageLoader.instance()
             cached = loader.get_cached_image(image_url)
             if cached:
-                self.pixmap = cached
-                self.update()
+                self._set_pixmap(cached)
             else:
-                loader.image_loaded.connect(self._on_image_loaded)
-                loader.request_image_priority(image_url)
+                loader.load_image(image_url, self._set_pixmap, target=self, priority=True)
 
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        if url == self.image_url:
+    def _set_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
             self.pixmap = pixmap
+            self._scaled_pixmap = None
+            self._scaled_size = None
             self.update()
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.pixmap = None
+        self._scaled_pixmap = None
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -137,23 +155,29 @@ class HeroPosterWidget(QWidget):
         if self.pixmap and not self.pixmap.isNull():
             is_wide_logo = (self.quality_tag == "REPLAY") or (self.pixmap.width() > self.pixmap.height() * 1.1)
             if is_wide_logo:
-                scaled = self.pixmap.scaled(
-                    self.WIDTH - 16, self.HEIGHT - 40,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                draw_x = (self.WIDTH - scaled.width()) // 2
-                draw_y = (self.HEIGHT - scaled.height()) // 2
-                painter.drawPixmap(draw_x, draw_y, scaled)
+                target_size = QSize(self.WIDTH - 16, self.HEIGHT - 40)
+                if self._scaled_pixmap is None or self._scaled_size != target_size:
+                    self._scaled_pixmap = self.pixmap.scaled(
+                        target_size,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self._scaled_size = target_size
+                draw_x = (self.WIDTH - self._scaled_pixmap.width()) // 2
+                draw_y = (self.HEIGHT - self._scaled_pixmap.height()) // 2
+                painter.drawPixmap(draw_x, draw_y, self._scaled_pixmap)
             else:
-                scaled = self.pixmap.scaled(
-                    self.WIDTH, self.HEIGHT,
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                crop_x = (scaled.width() - self.WIDTH) // 2
-                crop_y = (scaled.height() - self.HEIGHT) // 2
-                painter.drawPixmap(0, 0, scaled, crop_x, crop_y, self.WIDTH, self.HEIGHT)
+                target_size = QSize(self.WIDTH, self.HEIGHT)
+                if self._scaled_pixmap is None or self._scaled_size != target_size:
+                    self._scaled_pixmap = self.pixmap.scaled(
+                        target_size,
+                        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self._scaled_size = target_size
+                crop_x = (self._scaled_pixmap.width() - self.WIDTH) // 2
+                crop_y = (self._scaled_pixmap.height() - self.HEIGHT) // 2
+                painter.drawPixmap(0, 0, self._scaled_pixmap, crop_x, crop_y, self.WIDTH, self.HEIGHT)
         else:
             painter.setPen(QColor("#334155"))
             font = QFont("Segoe UI", 9)
@@ -205,7 +229,7 @@ class HeroPosterWidget(QWidget):
 class HeroBannerWidget(QFrame):
     resume_clicked = pyqtSignal(Channel, float)  # channel, position
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, db: Optional[Database] = None):
         super().__init__(parent)
         self.item_data: Optional[Dict[str, Any]] = None
         self.channel: Optional[Channel] = None
@@ -214,6 +238,14 @@ class HeroBannerWidget(QFrame):
         self.backdrop_pixmap: Optional[QPixmap] = None
         self.backdrop_url: str = ""
         self._backdrop_thread: Optional[BackdropFetchThread] = None
+        # Base partagée injectée par DashboardView : évite de réinstancier
+        # Database() (donc de relancer toute l'initialisation de la base) à
+        # chaque recherche de backdrop. ``None`` => repli sur l'ancien
+        # comportement pour un widget utilisé isolément.
+        self.db: Optional[Database] = db
+        # Jeton de fraîcheur : permet d'ignorer le résultat d'un fetch précédent
+        # sans recourir à QThread::terminate().
+        self._backdrop_token: int = 0
 
         self.setFixedHeight(240)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
@@ -465,40 +497,69 @@ class HeroBannerWidget(QFrame):
         # 2. Chercher le vrai backdrop HD 16:9 si playlist Xtream
         if ch.playlist_id and ch.stream_id:
             try:
-                db = Database()
+                # Réutilise la base injectée par DashboardView. Instancier
+                # Database() ici relançait toute l'initialisation de la base
+                # (~1,5 s d'interface figée) à chaque rafraîchissement de la vue.
+                # Repli identique à l'ancien comportement si aucune base réelle
+                # n'a été injectée (widget utilisé seul / base simulée en test).
+                db = self.db if isinstance(self.db, Database) else Database()
                 pl = db.get_playlist(ch.playlist_id)
                 if pl and pl.server_url and pl.username and pl.password:
-                    if self._backdrop_thread and self._backdrop_thread.isRunning():
-                        self._backdrop_thread.terminate()
-                    self._backdrop_thread = BackdropFetchThread(
+                    # Invalide le fetch précédent sans tuer son thread :
+                    # QThread::terminate() supprimait le thread en pleine
+                    # entrée/sortie Python et pouvait corrompre l'état natif
+                    # (crash silencieux 0xC0000005).
+                    self._backdrop_token += 1
+                    token = self._backdrop_token
+                    if is_worker_running(self._backdrop_thread):
+                        self._backdrop_thread.requestInterruption()
+                    backdrop_thread = BackdropFetchThread(
                         pl.server_url, pl.username, pl.password,
                         str(ch.stream_id), ch.stream_type, self
                     )
-                    self._backdrop_thread.backdrop_ready.connect(self._on_backdrop_url_resolved)
-                    self._backdrop_thread.start()
+                    backdrop_thread.backdrop_ready.connect(
+                        lambda url, t=token: self._on_backdrop_url_resolved(url, t)
+                    )
+                    # track_worker : deleteLater + purge de la référence Python dès que
+                    # l'objet C++ disparaît (sinon .isRunning() -> RuntimeError -> qFatal).
+                    track_worker(self, "_backdrop_thread", backdrop_thread)
+                    backdrop_thread.start()
             except Exception:
                 pass
 
-    def _on_backdrop_url_resolved(self, url: str):
+    def _on_backdrop_url_resolved(self, url: str, token: Optional[int] = None):
+        # Un rafraîchissement plus récent a été lancé entre-temps : ce résultat
+        # est obsolète, il ne doit pas écraser le backdrop courant.
+        if token is not None and token != self._backdrop_token:
+            return
         if not url:
             return
         self.backdrop_url = url
         loader = ImageLoader.instance()
         cached = loader.get_cached_image(url)
         if cached:
-            self.backdrop_pixmap = cached
-            self.update()
+            self._set_backdrop_pixmap(cached)
         else:
-            loader.image_loaded.connect(self._on_image_loaded)
-            loader.request_image_priority(url)
+            loader.load_image(url, self._set_backdrop_pixmap, target=self, priority=True)
 
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        if url == self.backdrop_url and not pixmap.isNull():
+    def _set_backdrop_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
             self.backdrop_pixmap = pixmap
             self.update()
-        elif url == (self.channel.logo_url if self.channel else "") and not self.backdrop_pixmap and not pixmap.isNull():
-            self.backdrop_pixmap = pixmap
-            self.update()
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.backdrop_pixmap = None
+        self.channel = None
+        # Un fetch en cours ne doit plus pouvoir appliquer son résultat après
+        # le nettoyage du widget.
+        self._backdrop_token += 1
+        if is_worker_running(self._backdrop_thread):
+            self._backdrop_thread.requestInterruption()
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def _on_resume(self):
         if self.channel:
@@ -602,17 +663,21 @@ class LiveTvMiniCard(QFrame):
         if cached:
             self._set_pixmap(cached)
         else:
-            loader.image_loaded.connect(self._on_image_loaded)
-            loader.request_image(self.channel.logo_url)
+            loader.load_image(self.channel.logo_url, self._set_pixmap, target=self)
             self._set_fallback_icon()
 
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        if url == self.channel.logo_url and not pixmap.isNull():
-            self._set_pixmap(pixmap)
-
     def _set_pixmap(self, pixmap: QPixmap):
-        scaled = pixmap.scaled(34, 34, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        self.logo_label.setPixmap(scaled)
+        if pixmap and not pixmap.isNull():
+            scaled = pixmap.scaled(34, 34, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.logo_label.setPixmap(scaled)
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.channel = None
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def _set_fallback_icon(self):
         self.logo_label.setPixmap(get_icon("live_tv", color="#64748b").pixmap(20, 20))
@@ -642,6 +707,8 @@ class DashboardPosterCard(QWidget):
         self.has_new_episodes = has_new_episodes
         self.meta = parse_movie_metadata(channel.name, channel.rating, channel.year)
         self.pixmap: Optional[QPixmap] = None
+        self._scaled_pixmap: Optional[QPixmap] = None
+        self._scaled_size = None
         self.is_hovered = False
 
         self.setFixedSize(self.CARD_WIDTH, self.TOTAL_HEIGHT)
@@ -654,16 +721,26 @@ class DashboardPosterCard(QWidget):
         loader = ImageLoader.instance()
         cached = loader.get_cached_image(self.channel.logo_url)
         if cached:
-            self.pixmap = cached
-            self.update()
+            self._set_pixmap(cached)
         else:
-            loader.image_loaded.connect(self._on_image_loaded)
-            loader.request_image(self.channel.logo_url)
+            loader.load_image(self.channel.logo_url, self._set_pixmap, target=self)
 
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        if url == self.channel.logo_url:
+    def _set_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
             self.pixmap = pixmap
+            self._scaled_pixmap = None
+            self._scaled_size = None
             self.update()
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.pixmap = None
+        self._scaled_pixmap = None
+        self.channel = None
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def enterEvent(self, event):
         self.is_hovered = True
@@ -712,23 +789,29 @@ class DashboardPosterCard(QWidget):
         if self.pixmap and not self.pixmap.isNull():
             is_wide_logo = is_replay or (self.pixmap.width() > self.pixmap.height() * 1.1 and self.channel.stream_type != "series")
             if is_wide_logo:
-                scaled = self.pixmap.scaled(
-                    self.CARD_WIDTH - 20, self.POSTER_HEIGHT - 40,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                draw_x = (self.CARD_WIDTH - scaled.width()) // 2
-                draw_y = (self.POSTER_HEIGHT - scaled.height()) // 2
-                painter.drawPixmap(draw_x, draw_y, scaled)
+                target_size = QSize(self.CARD_WIDTH - 20, self.POSTER_HEIGHT - 40)
+                if self._scaled_pixmap is None or self._scaled_size != target_size:
+                    self._scaled_pixmap = self.pixmap.scaled(
+                        target_size,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self._scaled_size = target_size
+                draw_x = (self.CARD_WIDTH - self._scaled_pixmap.width()) // 2
+                draw_y = (self.POSTER_HEIGHT - self._scaled_pixmap.height()) // 2
+                painter.drawPixmap(draw_x, draw_y, self._scaled_pixmap)
             else:
-                scaled = self.pixmap.scaled(
-                    self.CARD_WIDTH, self.POSTER_HEIGHT,
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                crop_x = (scaled.width() - self.CARD_WIDTH) // 2
-                crop_y = (scaled.height() - self.POSTER_HEIGHT) // 2
-                painter.drawPixmap(0, 0, scaled, crop_x, crop_y, self.CARD_WIDTH, self.POSTER_HEIGHT)
+                target_size = QSize(self.CARD_WIDTH, self.POSTER_HEIGHT)
+                if self._scaled_pixmap is None or self._scaled_size != target_size:
+                    self._scaled_pixmap = self.pixmap.scaled(
+                        target_size,
+                        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self._scaled_size = target_size
+                crop_x = (self._scaled_pixmap.width() - self.CARD_WIDTH) // 2
+                crop_y = (self._scaled_pixmap.height() - self.POSTER_HEIGHT) // 2
+                painter.drawPixmap(0, 0, self._scaled_pixmap, crop_x, crop_y, self.CARD_WIDTH, self.POSTER_HEIGHT)
         else:
             painter.setPen(QColor("#334155"))
             font = QFont("Segoe UI", 9)
@@ -936,6 +1019,8 @@ class DashboardDownloadCard(QWidget):
         super().__init__(parent)
         self.item = item
         self.pixmap: Optional[QPixmap] = None
+        self._scaled_pixmap: Optional[QPixmap] = None
+        self._scaled_size = None
         self.is_hovered = False
 
         self.setFixedSize(self.CARD_WIDTH, self.TOTAL_HEIGHT)
@@ -948,16 +1033,26 @@ class DashboardDownloadCard(QWidget):
         loader = ImageLoader.instance()
         cached = loader.get_cached_image(self.item.poster_url)
         if cached:
-            self.pixmap = cached
-            self.update()
+            self._set_pixmap(cached)
         else:
-            loader.image_loaded.connect(self._on_image_loaded)
-            loader.request_image(self.item.poster_url)
+            loader.load_image(self.item.poster_url, self._set_pixmap, target=self)
 
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        if url == self.item.poster_url:
+    def _set_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
             self.pixmap = pixmap
+            self._scaled_pixmap = None
+            self._scaled_size = None
             self.update()
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.pixmap = None
+        self._scaled_pixmap = None
+        self.item = None
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def enterEvent(self, event):
         self.is_hovered = True
@@ -988,14 +1083,17 @@ class DashboardDownloadCard(QWidget):
         painter.fillRect(p_rect.toRect(), QColor("#131b2e"))
 
         if self.pixmap and not self.pixmap.isNull():
-            scaled = self.pixmap.scaled(
-                self.CARD_WIDTH, self.POSTER_HEIGHT,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            crop_x = (scaled.width() - self.CARD_WIDTH) // 2
-            crop_y = (scaled.height() - self.POSTER_HEIGHT) // 2
-            painter.drawPixmap(0, 0, scaled, crop_x, crop_y, self.CARD_WIDTH, self.POSTER_HEIGHT)
+            target_size = QSize(self.CARD_WIDTH, self.POSTER_HEIGHT)
+            if self._scaled_pixmap is None or self._scaled_size != target_size:
+                self._scaled_pixmap = self.pixmap.scaled(
+                    target_size,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self._scaled_size = target_size
+            crop_x = (self._scaled_pixmap.width() - self.CARD_WIDTH) // 2
+            crop_y = (self._scaled_pixmap.height() - self.POSTER_HEIGHT) // 2
+            painter.drawPixmap(0, 0, self._scaled_pixmap, crop_x, crop_y, self.CARD_WIDTH, self.POSTER_HEIGHT)
         else:
             painter.setPen(QColor("#334155"))
             font = QFont("Segoe UI", 9)
@@ -1233,6 +1331,8 @@ class DashboardSection(QWidget):
             item = self.items_layout.takeAt(0)
             w = item.widget()
             if w:
+                if hasattr(w, "cleanup"):
+                    w.cleanup()
                 w.deleteLater()
         QTimer.singleShot(30, self._update_scroll_buttons)
 
@@ -1340,7 +1440,7 @@ class DashboardView(QWidget):
         self.container_layout.setSpacing(16)
 
         # 1. Bannière Hero "En cours de lecture"
-        self.hero_banner = HeroBannerWidget(self.container_widget)
+        self.hero_banner = HeroBannerWidget(self.container_widget, self.db)
         self.hero_banner.resume_clicked.connect(self.resume_playback_requested.emit)
         self.container_layout.addWidget(self.hero_banner)
 

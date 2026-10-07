@@ -76,6 +76,8 @@ class RecentlyWatchedPosterWidget(QWidget):
         self.meta = parse_movie_metadata(self.channel.name, self.channel.rating, self.channel.year)
         self.percentage: float = float(item.get("percentage", 0.0))
         self.pixmap: Optional[QPixmap] = None
+        self._scaled_pixmap: Optional[QPixmap] = None
+        self._scaled_size = None
         self.is_hovered = False
         self._cross_hovered = False
 
@@ -90,16 +92,26 @@ class RecentlyWatchedPosterWidget(QWidget):
         loader = ImageLoader.instance()
         cached = loader.get_cached_image(self.channel.logo_url)
         if cached:
-            self.pixmap = cached
-            self.update()
+            self._set_pixmap(cached)
         else:
-            loader.image_loaded.connect(self._on_image_loaded)
-            loader.request_image(self.channel.logo_url)
+            loader.load_image(self.channel.logo_url, self._set_pixmap, target=self)
 
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        if url == self.channel.logo_url:
+    def _set_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
             self.pixmap = pixmap
+            self._scaled_pixmap = None
+            self._scaled_size = None
             self.update()
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.pixmap = None
+        self._scaled_pixmap = None
+        self.channel = None
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def set_hovered(self, hovered: bool):
         self.is_hovered = hovered
@@ -140,23 +152,27 @@ class RecentlyWatchedPosterWidget(QWidget):
             if self.channel.stream_type in ("live", "replay"):
                 painter.fillRect(rect, QColor("#131b2e"))
                 target_size = QSize(rect.width() - 24, rect.height() - 40)
-                scaled = self.pixmap.scaled(
-                    target_size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                sx = (rect.width() - scaled.width()) // 2
-                sy = (rect.height() - scaled.height()) // 2
-                painter.drawPixmap(sx, sy, scaled)
+                if self._scaled_pixmap is None or self._scaled_size != target_size:
+                    self._scaled_pixmap = self.pixmap.scaled(
+                        target_size,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self._scaled_size = target_size
+                sx = (rect.width() - self._scaled_pixmap.width()) // 2
+                sy = (rect.height() - self._scaled_pixmap.height()) // 2
+                painter.drawPixmap(sx, sy, self._scaled_pixmap)
             else:
-                scaled = self.pixmap.scaled(
-                    rect.size(),
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                sx = (rect.width() - scaled.width()) // 2
-                sy = (rect.height() - scaled.height()) // 2
-                painter.drawPixmap(sx, sy, scaled)
+                if self._scaled_pixmap is None or self._scaled_size != rect.size():
+                    self._scaled_pixmap = self.pixmap.scaled(
+                        rect.size(),
+                        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self._scaled_size = rect.size()
+                sx = (rect.width() - self._scaled_pixmap.width()) // 2
+                sy = (rect.height() - self._scaled_pixmap.height()) // 2
+                painter.drawPixmap(sx, sy, self._scaled_pixmap)
         else:
             painter.fillRect(rect, QColor("#1e293b"))
             icon_name = "replay" if self.channel.stream_type == "replay" else ("live_tv" if self.channel.stream_type == "live" else ("video_library" if self.channel.stream_type == "series" else "movie"))
@@ -364,6 +380,12 @@ class RecentlyWatchedCardWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.item)
         super().mousePressEvent(event)
+
+    def cleanup(self):
+        """Libère explicitement les ressources."""
+        if hasattr(self, "poster_widget") and self.poster_widget:
+            self.poster_widget.cleanup()
+        self.item = {}
 
 
 class RecentlyWatchedView(QWidget):
@@ -605,6 +627,8 @@ class RecentlyWatchedView(QWidget):
         # 1. Nettoyer la grille actuelle
         for card in self._cards:
             self.grid_layout.removeWidget(card)
+            if hasattr(card, "cleanup"):
+                card.cleanup()
             card.deleteLater()
         self._cards.clear()
 

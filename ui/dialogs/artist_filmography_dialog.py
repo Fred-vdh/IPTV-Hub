@@ -27,6 +27,7 @@ from core.tmdb_client import (
 from ui.icons import get_icon
 from ui.widgets.rounded_poster import RoundedPosterLabel
 from core.i18n import tr
+from core.qt_worker_utils import is_worker_running
 
 
 class ArtistSuggestionsWorker(QThread):
@@ -210,15 +211,20 @@ class ArtistMediaCard(QFrame):
             if cached:
                 self.poster.setPixmap(cached)
             else:
-                ImageLoader.instance().image_loaded.connect(self._on_image_loaded)
-                ImageLoader.instance().request_image(url)
+                ImageLoader.instance().load_image(url, self._set_poster_pixmap, target=self)
 
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        target_url = self.channel.logo_url
-        if not target_url and self.item.get("poster_path"):
-            target_url = f"https://image.tmdb.org/t/p/w300{self.item['poster_path']}"
-        if url == target_url:
+    def _set_poster_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
             self.poster.setPixmap(pixmap)
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.channel = None
+        self.item = {}
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -475,13 +481,12 @@ class ArtistFilmographyDialog(QDialog):
         p_path = details.get("profile_path")
         if p_path:
             self._profile_img_url = f"https://image.tmdb.org/t/p/w300{p_path}"
-            cached = ImageLoader.instance().get_cached_image(self._profile_img_url)
-            if cached:
-                self.profile_photo.setPixmap(cached)
-            else:
-                self._disconnect_profile_loader()
-                ImageLoader.instance().image_loaded.connect(self._on_profile_loaded)
-                ImageLoader.instance().request_image_priority(self._profile_img_url)
+            ImageLoader.instance().load_image(
+                self._profile_img_url,
+                lambda px: self.profile_photo.setPixmap(px),
+                target=self,
+                priority=True
+            )
 
         dept = details.get("known_for_department", "")
         dept_fr = tr("Acteur / Actrice") if dept == "Acting" else (tr("Réalisateur") if dept == "Directing" else dept)
@@ -708,13 +713,11 @@ class ArtistSuggestionItemWidget(QWidget):
         p_path = person.get("profile_path")
         if p_path:
             img_url = f"https://image.tmdb.org/t/p/w185{p_path}"
-            cached = ImageLoader.instance().get_cached_image(img_url)
-            if cached:
-                self.photo_lbl.setPixmap(cached)
-            else:
-                self._target_url = img_url
-                ImageLoader.instance().image_loaded.connect(self._on_img_loaded)
-                ImageLoader.instance().request_image(img_url)
+            ImageLoader.instance().load_image(
+                img_url,
+                lambda px: self.photo_lbl.setPixmap(px),
+                target=self
+            )
         layout.addWidget(self.photo_lbl)
 
         # Textes (Nom complet en gras + Métier et films connus)
@@ -994,7 +997,9 @@ class ArtistSearchPromptDialog(QDialog):
             self.empty_hint_lbl.show()
             return
 
-        if self._worker and self._worker.isRunning():
+        # L'objet C++ du worker peut déjà être détruit (deleteLater) : un appel
+        # direct à .isRunning() lèverait une RuntimeError fatale (qFatal/abort).
+        if is_worker_running(getattr(self, "_worker", None)):
             self._worker.terminate()
 
         self.empty_hint_lbl.setText(tr("Recherche des artistes correspondants..."))
@@ -1080,7 +1085,7 @@ class ArtistSearchPromptDialog(QDialog):
         return None
 
     def _stop_worker(self):
-        if self._worker and self._worker.isRunning():
+        if is_worker_running(getattr(self, "_worker", None)):
             self._worker.terminate()
             self._worker.wait(1000)
 

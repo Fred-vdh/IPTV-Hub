@@ -66,7 +66,19 @@ class PlaylistImportWorker(QThread):
                     username=self.playlist.username,
                     password=self.playlist.password
                 )
-                client.authenticate()
+                auth_data = client.authenticate()
+                u_info = auth_data.get("user_info", {})
+                self.playlist.account_status = u_info.get("status", "Active")
+                self.playlist.exp_date = str(u_info.get("exp_date", ""))
+                self.playlist.max_connections = str(u_info.get("max_connections", "1"))
+                self.playlist.active_cons = str(u_info.get("active_cons", "0"))
+                self.db.update_playlist_account_info(
+                    playlist_id,
+                    self.playlist.account_status,
+                    self.playlist.exp_date,
+                    self.playlist.max_connections,
+                    self.playlist.active_cons
+                )
 
                 self.progress.emit("Récupération des chaînes en direct...")
                 live_channels = client.get_live_streams(playlist_id=playlist_id)

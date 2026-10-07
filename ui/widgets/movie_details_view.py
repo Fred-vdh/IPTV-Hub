@@ -33,6 +33,7 @@ from core.xtream_client import XtreamClient
 from ui.icons import get_icon
 from ui.widgets.rounded_poster import RoundedPosterLabel
 from core.i18n import tr
+from core.qt_worker_utils import is_worker_running, stop_tracked_worker, track_worker
 
 
 def _fmt(seconds: float) -> str:
@@ -576,16 +577,19 @@ class MovieDetailsView(QWidget):
                 self.playlist.password,
                 ua,
             )
-            self._worker = _MovieInfoWorker(client, channel.stream_id, self)
-            self._worker.finished.connect(self._on_extra_info_loaded)
-            self._worker.start()
+            worker = _MovieInfoWorker(client, channel.stream_id, self)
+            worker.finished.connect(self._on_extra_info_loaded)
+            # track_worker : deleteLater() + purge de la référence Python (évite une
+            # RuntimeError sur _worker.isRunning() -> qFatal/abort de l'application).
+            track_worker(self, "_worker", worker)
+            worker.start()
         else:
             self.synopsis_label.setText(
                 f"Film : {channel.name}\nCatégorie : {channel.group_title}\n\n"
                 "Prêt pour le streaming en haute définition."
             )
             pref_lang = self.db.get_settings().preferred_audio_lang
-            self._trailer_worker = _TrailerLookupWorker(
+            trailer_worker = _TrailerLookupWorker(
                 media_type="movie",
                 tmdb_id="",
                 title=channel.name,
@@ -594,8 +598,9 @@ class MovieDetailsView(QWidget):
                 orig_trailer="",
                 parent=self,
             )
-            self._trailer_worker.finished_trailer.connect(self._on_trailer_resolved)
-            self._trailer_worker.start()
+            trailer_worker.finished_trailer.connect(self._on_trailer_resolved)
+            track_worker(self, "_trailer_worker", trailer_worker)
+            trailer_worker.start()
 
     def refresh_progress(self):
         """Met à jour l'affichage des boutons de reprise selon la progression sauvegardée."""
@@ -615,12 +620,7 @@ class MovieDetailsView(QWidget):
             self._set_poster(cached)
         else:
             self.poster_label.clear()
-            loader.image_loaded.connect(self._on_poster_loaded)
-            loader.request_image_priority(self.channel.logo_url)
-
-    def _on_poster_loaded(self, url: str, pixmap: QPixmap):
-        if self.channel and url == self.channel.logo_url:
-            self._set_poster(pixmap)
+            loader.load_image(self.channel.logo_url, self._set_poster, target=self, priority=True)
 
     def _set_poster(self, pixmap: QPixmap):
         if not pixmap or pixmap.isNull():
@@ -929,8 +929,7 @@ class MovieDetailsView(QWidget):
                 self._backdrop_pixmap = cached
                 self.card_frame.update()
             else:
-                ImageLoader.instance().image_loaded.connect(self._on_backdrop_loaded)
-                ImageLoader.instance().request_image_priority(backdrop_url)
+                ImageLoader.instance().load_image(backdrop_url, self._set_backdrop_pixmap, target=self, priority=True)
 
         # 1. Bande-annonce YouTube (avec recherche automatique dans la langue préférée)
         orig_trailer = str(info.get("youtube_trailer", "") or "").strip()
@@ -942,7 +941,7 @@ class MovieDetailsView(QWidget):
             self._setup_trailer(orig_trailer, name="Bande-annonce d'origine", badge="VO")
 
         pref_lang = self.db.get_settings().preferred_audio_lang
-        self._trailer_worker = _TrailerLookupWorker(
+        trailer_worker = _TrailerLookupWorker(
             media_type="movie",
             tmdb_id=tmdb_id,
             title=title,
@@ -951,8 +950,9 @@ class MovieDetailsView(QWidget):
             orig_trailer=orig_trailer,
             parent=self,
         )
-        self._trailer_worker.finished_trailer.connect(self._on_trailer_resolved)
-        self._trailer_worker.start()
+        trailer_worker.finished_trailer.connect(self._on_trailer_resolved)
+        track_worker(self, "_trailer_worker", trailer_worker)
+        trailer_worker.start()
 
         # 2. Avis spectateurs TMDB (Module de test)
         if tmdb_id:
@@ -1004,17 +1004,15 @@ class MovieDetailsView(QWidget):
         if cached:
             self.trailer_thumb_label.setPixmap(cached)
         else:
-            ImageLoader.instance().image_loaded.connect(self._on_trailer_thumb_loaded)
+            ImageLoader.instance().load_image(thumb_url, self._set_trailer_thumb, target=self)
         if not getattr(self, "_is_video_playing", False) and not getattr(self, "_video_widget", None):
             self.trailer_section.show()
         else:
             self.trailer_section.hide()
 
-    def _on_trailer_thumb_loaded(self, url: str, pixmap: QPixmap):
-        if hasattr(self, "_current_trailer_id") and self._current_trailer_id:
-            expected = f"https://img.youtube.com/vi/{self._current_trailer_id}/hqdefault.jpg"
-            if url == expected:
-                self.trailer_thumb_label.setPixmap(pixmap)
+    def _set_trailer_thumb(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
+            self.trailer_thumb_label.setPixmap(pixmap)
 
     def _on_play_trailer_clicked(self):
         if hasattr(self, "_current_trailer_id") and self._current_trailer_id:
@@ -1028,15 +1026,16 @@ class MovieDetailsView(QWidget):
             webbrowser.open(f"https://www.youtube.com/watch?v={self._current_trailer_id}")
 
     def _load_tmdb_reviews(self, tmdb_id: str):
-        if self._tmdb_worker and self._tmdb_worker.isRunning():
+        if is_worker_running(self._tmdb_worker):
             try:
                 self._tmdb_worker.finished_reviews.disconnect()
             except Exception:
                 pass
 
-        self._tmdb_worker = _TMDBReviewsWorker(tmdb_id, self)
-        self._tmdb_worker.finished_reviews.connect(self._on_tmdb_reviews_loaded)
-        self._tmdb_worker.start()
+        worker = _TMDBReviewsWorker(tmdb_id, self)
+        worker.finished_reviews.connect(self._on_tmdb_reviews_loaded)
+        track_worker(self, "_tmdb_worker", worker)
+        worker.start()
 
     def _on_tmdb_reviews_loaded(self, reviews: list):
         while self.reviews_list_layout.count():
@@ -1107,10 +1106,13 @@ class MovieDetailsView(QWidget):
 
         self.reviews_section.show()
 
-    def _on_backdrop_loaded(self, url: str, pixmap: QPixmap):
-        if hasattr(self, "_backdrop_url") and self._backdrop_url and url == self._backdrop_url:
+    def _set_backdrop_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
             self._backdrop_pixmap = pixmap
             self.card_frame.update()
+
+    def _on_backdrop_loaded(self, url: str, pixmap: QPixmap):
+        self._set_backdrop_pixmap(pixmap)
 
     def _paint_card_backdrop(self, event):
         """Dessine un fond avec dégradé de transparence vers le bas qui rejoint la couleur du fond de la fenêtre.
@@ -1239,27 +1241,35 @@ class MovieDetailsView(QWidget):
         self.stop_active_workers()
 
     def stop_active_workers(self):
-        """Arrête tous les threads d'arrière-plan actifs pour libérer le processeur et le réseau."""
-        if hasattr(self, "_worker") and self._worker:
-            try:
-                self._worker.finished.disconnect()
-            except Exception:
-                pass
-            self._worker = None
+        """Arrête tous les threads d'arrière-plan actifs pour libérer le processeur et le réseau.
 
-        if hasattr(self, "_trailer_worker") and self._trailer_worker:
+        Les accès passent par core.qt_worker_utils : un objet C++ déjà détruit
+        (deleteLater) ne doit jamais lever d'exception, car une exception non gérée
+        dans un slot provoque un qFatal/abort de toute l'application.
+        """
+        worker = getattr(self, "_worker", None)
+        if worker is not None:
             try:
-                self._trailer_worker.finished_trailer.disconnect()
+                worker.finished.disconnect()
             except Exception:
                 pass
-            self._trailer_worker = None
+            stop_tracked_worker(self, "_worker")
 
-        if hasattr(self, "_tmdb_worker") and self._tmdb_worker:
+        trailer_worker = getattr(self, "_trailer_worker", None)
+        if trailer_worker is not None:
             try:
-                self._tmdb_worker.finished_reviews.disconnect()
+                trailer_worker.finished_trailer.disconnect()
             except Exception:
                 pass
-            self._tmdb_worker = None
+            stop_tracked_worker(self, "_trailer_worker")
+
+        tmdb_worker = getattr(self, "_tmdb_worker", None)
+        if tmdb_worker is not None:
+            try:
+                tmdb_worker.finished_reviews.disconnect()
+            except Exception:
+                pass
+            stop_tracked_worker(self, "_tmdb_worker")
 
     def _on_scroll_sync(self, _=None):
         if self._video_widget and self._video_widget.isVisible():

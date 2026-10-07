@@ -17,6 +17,7 @@ from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from ui.widgets.poster_utils import draw_added_date_badge
 from core.i18n import tr, I18nManager
+from core.qt_worker_utils import is_worker_running
 
 # ==============================================================================
 # FONCTIONNALITÉ EXPÉRIMENTALE : RECHERCHE PAR ACTEUR / RÉALISATEUR (OPTION 3)
@@ -86,8 +87,9 @@ class PosterWidget(QWidget):
         self.has_new_episodes = has_new_episodes
         self.meta = parse_movie_metadata(channel.name, channel.rating, channel.year)
         self.pixmap: Optional[QPixmap] = None
+        self._scaled_pixmap: Optional[QPixmap] = None
+        self._scaled_size = None
         self.is_hovered = False
-        self._is_connected_to_loader = False
 
         self.setFixedSize(160, 240)
         self.setMouseTracking(True)
@@ -100,29 +102,25 @@ class PosterWidget(QWidget):
         loader = ImageLoader.instance()
         cached = loader.get_cached_image(self.channel.logo_url)
         if cached:
-            self.pixmap = cached
-            self.update()
+            self._set_pixmap(cached)
         else:
-            self._is_connected_to_loader = True
-            loader.image_loaded.connect(self._on_image_loaded)
-            loader.request_image(self.channel.logo_url)
+            loader.load_image(self.channel.logo_url, self._set_pixmap, target=self)
 
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        if url == self.channel.logo_url:
+    def _set_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
             self.pixmap = pixmap
-            self._disconnect_loader()
+            self._scaled_pixmap = None
+            self._scaled_size = None
             self.update()
 
-    def _disconnect_loader(self):
-        if getattr(self, "_is_connected_to_loader", False):
-            try:
-                ImageLoader.instance().image_loaded.disconnect(self._on_image_loaded)
-            except Exception:
-                pass
-            self._is_connected_to_loader = False
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.pixmap = None
+        self._scaled_pixmap = None
+        self.channel = None
 
     def closeEvent(self, event):
-        self._disconnect_loader()
+        self.cleanup()
         super().closeEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
@@ -153,14 +151,16 @@ class PosterWidget(QWidget):
         painter.setClipPath(path)
 
         if self.pixmap and not self.pixmap.isNull():
-            scaled = self.pixmap.scaled(
-                rect.size(),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            sx = (rect.width() - scaled.width()) // 2
-            sy = (rect.height() - scaled.height()) // 2
-            painter.drawPixmap(sx, sy, scaled)
+            if self._scaled_pixmap is None or self._scaled_size != rect.size():
+                self._scaled_pixmap = self.pixmap.scaled(
+                    rect.size(),
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self._scaled_size = rect.size()
+            sx = (rect.width() - self._scaled_pixmap.width()) // 2
+            sy = (rect.height() - self._scaled_pixmap.height()) // 2
+            painter.drawPixmap(sx, sy, self._scaled_pixmap)
         else:
             # Fond sombre et icône placeholder si pas d'image
             painter.fillRect(rect, QColor("#1e293b"))
@@ -389,6 +389,12 @@ class MovieCardWidget(QWidget):
             self.favorite_toggled.emit(self.channel)
         elif action == info_act:
             self.details_requested.emit(self.channel)
+
+    def cleanup(self):
+        """Libère explicitement les ressources pour éviter toute rétention mémoire."""
+        if hasattr(self, "poster_widget") and self.poster_widget:
+            self.poster_widget.cleanup()
+        self.channel = None
 
 
 class VODGridView(QWidget):
@@ -770,7 +776,7 @@ class VODGridView(QWidget):
         # 1. Annulation de toute requête en cours et invalidation des lots précédents
         self._current_batch_id += 1
         self._pending_cards_queue.clear()
-        if self._current_worker and self._current_worker.isRunning():
+        if is_worker_running(getattr(self, "_current_worker", None)):
             self._current_worker.requestInterruption()
         self.is_loading = False
 
@@ -836,13 +842,15 @@ class VODGridView(QWidget):
             count_word = item_singular if is_singular else item_plural
             self.items_count_label.setText(f"{formatted_total} {count_word}")
 
-        # Nettoyage ultra-rapide de la grille sans saccade
+        # Nettoyage ultra-rapide de la grille sans saccade ni fuite mémoire
         self.grid_container.setUpdatesEnabled(False)
         try:
             while self.grid_layout.count():
                 item = self.grid_layout.takeAt(0)
                 widget = item.widget()
                 if widget:
+                    if hasattr(widget, "cleanup"):
+                        widget.cleanup()
                     widget.deleteLater()
         finally:
             self.grid_container.setUpdatesEnabled(True)
@@ -959,6 +967,7 @@ class VODGridView(QWidget):
         )
         worker.results_ready.connect(self._on_worker_results)
         worker.finished.connect(self._on_worker_finished)
+        worker.finished.connect(worker.deleteLater)
         self._current_worker = worker
         worker.start()
 
@@ -1126,7 +1135,7 @@ class VODGridView(QWidget):
         self._current_batch_id += 1
         self._pending_cards_queue.clear()
         worker = getattr(self, "_current_worker", None)
-        if worker and worker.isRunning():
+        if is_worker_running(worker):
             worker.requestInterruption()
             worker.wait(2000)
         self._current_worker = None

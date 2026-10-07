@@ -62,11 +62,12 @@ class RecentPosterWidget(QWidget):
         self.channel = channel
         self.meta = parse_movie_metadata(channel.name, channel.rating, channel.year)
         self.pixmap: Optional[QPixmap] = None
+        self._scaled_pixmap: Optional[QPixmap] = None
+        self._scaled_size = None
         self.is_hovered = False
 
         self.setFixedSize(155, 230)
         self.setMouseTracking(True)
-        ImageLoader.instance().image_loaded.connect(self._on_image_loaded)
         self._load_image()
 
     def _load_image(self):
@@ -76,17 +77,28 @@ class RecentPosterWidget(QWidget):
         loader = ImageLoader.instance()
         cached = loader.get_cached_image(self.channel.logo_url)
         if cached:
-            self.pixmap = cached
-            self.update()
+            self._set_pixmap(cached)
         else:
-            loader.request_image(self.channel.logo_url)
+            loader.load_image(self.channel.logo_url, self._set_pixmap, target=self)
 
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        if self.channel and self.channel.logo_url and url == self.channel.logo_url:
+    def _set_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
             self.pixmap = pixmap
+            self._scaled_pixmap = None
+            self._scaled_size = None
             self.update()
             if self.parentWidget():
                 self.parentWidget().update()
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.pixmap = None
+        self._scaled_pixmap = None
+        self.channel = None
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def set_hovered(self, hovered: bool):
         self.is_hovered = hovered
@@ -108,23 +120,27 @@ class RecentPosterWidget(QWidget):
             if self.channel.stream_type == "live":
                 painter.fillRect(rect, QColor("#131b2e"))
                 target_size = QSize(rect.width() - 24, rect.height() - 44)
-                scaled = self.pixmap.scaled(
-                    target_size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                sx = (rect.width() - scaled.width()) // 2
-                sy = (rect.height() - scaled.height()) // 2 + 6
-                painter.drawPixmap(sx, sy, scaled)
+                if self._scaled_pixmap is None or self._scaled_size != target_size:
+                    self._scaled_pixmap = self.pixmap.scaled(
+                        target_size,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self._scaled_size = target_size
+                sx = (rect.width() - self._scaled_pixmap.width()) // 2
+                sy = (rect.height() - self._scaled_pixmap.height()) // 2 + 6
+                painter.drawPixmap(sx, sy, self._scaled_pixmap)
             else:
-                scaled = self.pixmap.scaled(
-                    rect.size(),
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                sx = (rect.width() - scaled.width()) // 2
-                sy = (rect.height() - scaled.height()) // 2
-                painter.drawPixmap(sx, sy, scaled)
+                if self._scaled_pixmap is None or self._scaled_size != rect.size():
+                    self._scaled_pixmap = self.pixmap.scaled(
+                        rect.size(),
+                        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self._scaled_size = rect.size()
+                sx = (rect.width() - self._scaled_pixmap.width()) // 2
+                sy = (rect.height() - self._scaled_pixmap.height()) // 2
+                painter.drawPixmap(sx, sy, self._scaled_pixmap)
         else:
             painter.fillRect(rect, QColor("#1e293b"))
             icon_name = "movie" if self.channel.stream_type == "movie" else ("tv" if self.channel.stream_type == "series" else "live_tv")
@@ -309,6 +325,12 @@ class RecentCardWidget(QWidget):
             self.clicked.emit(self.channel)
         super().mousePressEvent(event)
 
+    def cleanup(self):
+        """Libère explicitement les ressources."""
+        if hasattr(self, "poster_widget") and self.poster_widget:
+            self.poster_widget.cleanup()
+        self.channel = None
+
 
 class CarouselRowWidget(QWidget):
     """Rangée carrousel horizontale avec en-tête, badge de compteur, lien 'Parcourir...' et boutons de défilement < >."""
@@ -447,6 +469,8 @@ class CarouselRowWidget(QWidget):
             item = self.inner_layout.takeAt(0)
             w = item.widget()
             if w:
+                if hasattr(w, "cleanup"):
+                    w.cleanup()
                 w.deleteLater()
         self._cards.clear()
 

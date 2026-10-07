@@ -37,6 +37,8 @@ class RoundedPosterLabel(QLabel):
         self.fallback_icon = fallback_icon
         self.added_at: Optional[str] = None
         self.stream_type: str = "movie"
+        self._cached_scaled = None
+        self._cached_size = None
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background: transparent; border: none;")
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -45,6 +47,21 @@ class RoundedPosterLabel(QLabel):
         self.added_at = added_at
         self.stream_type = stream_type
         self.update()
+
+    def setPixmap(self, pixmap):
+        super().setPixmap(pixmap)
+        self._cached_scaled = None
+        self._cached_size = None
+
+    def clear(self):
+        super().clear()
+        self._cached_scaled = None
+        self._cached_size = None
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._cached_scaled = None
+        self._cached_size = None
 
     def set_pixmap(self, pixmap):
         """Alias pythonique pour setPixmap."""
@@ -71,14 +88,16 @@ class RoundedPosterLabel(QLabel):
         # 2. Dessin de l'affiche ou du fond de secours
         pm = self.pixmap()
         if pm and not pm.isNull():
-            scaled = pm.scaled(
-                rect.size(),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            sx = int((w - scaled.width()) / 2)
-            sy = int((h - scaled.height()) / 2)
-            painter.drawPixmap(sx, sy, scaled)
+            if self._cached_scaled is None or self._cached_size != rect.size():
+                self._cached_scaled = pm.scaled(
+                    rect.size(),
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self._cached_size = rect.size()
+            sx = int((w - self._cached_scaled.width()) / 2)
+            sy = int((h - self._cached_scaled.height()) / 2)
+            painter.drawPixmap(sx, sy, self._cached_scaled)
         else:
             painter.fillRect(rect, QColor(self.bg_color))
             icon_size = max(24, min(48, int(min(w, h) / 3)))

@@ -14,6 +14,7 @@ from core.image_loader import ImageLoader
 from core.download_manager import DownloadManager, get_default_download_dir, DownloadTask
 from ui.icons import get_icon
 from ui.widgets.rounded_poster import RoundedPosterLabel
+from core.qt_worker_utils import is_worker_running
 
 
 class MovieInfoWorker(QThread):
@@ -443,9 +444,10 @@ class MovieDetailsDialog(QDialog):
             loader.image_loaded.disconnect(self._on_poster_loaded)
         except Exception:
             pass
-        if hasattr(self, "worker") and self.worker.isRunning():
-            self.worker.quit()
-            self.worker.wait(500)
+        worker = getattr(self, "worker", None)
+        if is_worker_running(worker):
+            worker.quit()
+            worker.wait(500)
 
     def _on_play(self):
         self.accept()
@@ -462,18 +464,12 @@ class MovieDetailsDialog(QDialog):
             self.poster_label.clear()
             return
 
-        loader = ImageLoader.instance()
-        cached = loader.get_cached_image(self.channel.logo_url)
-        if cached:
-            self._set_poster_pixmap(cached)
-        else:
-            self.poster_label.clear()
-            loader.image_loaded.connect(self._on_poster_loaded)
-            loader.request_image_priority(self.channel.logo_url)
-
-    def _on_poster_loaded(self, url: str, pixmap: QPixmap):
-        if url == self.channel.logo_url:
-            self._set_poster_pixmap(pixmap)
+        ImageLoader.instance().load_image(
+            self.channel.logo_url,
+            self._set_poster_pixmap,
+            target=self,
+            priority=True
+        )
 
     def _set_poster_pixmap(self, pixmap: QPixmap):
         self.poster_label.setPixmap(pixmap)
@@ -509,7 +505,12 @@ class MovieDetailsDialog(QDialog):
                 self.channel.logo_url = cover
                 if self.channel.id:
                     self.db.update_channel_logo(self.channel.id, cover)
-                ImageLoader.instance().request_image_priority(cover)
+                ImageLoader.instance().load_image(
+                    cover,
+                    self._set_poster_pixmap,
+                    target=self,
+                    priority=True
+                )
 
         plot = info.get("plot") or info.get("description") or "Aucun résumé disponible pour ce film."
         genre = info.get("genre", "")
@@ -529,3 +530,7 @@ class MovieDetailsDialog(QDialog):
 
         self.details_label.setText("<br>".join(details_txt))
         self.synopsis_label.setText(plot)
+
+    def closeEvent(self, event):
+        ImageLoader.instance().cancel_target(self)
+        super().closeEvent(event)

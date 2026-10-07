@@ -3,6 +3,7 @@ Délégué de rendu haute performance (QStyledItemDelegate) pour les chaînes IP
 Affiche le logo, le nom, le programme EPG en cours, et la barre de progression temporelle.
 """
 
+from collections import OrderedDict
 from typing import Optional
 from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QStyle
 from PyQt6.QtCore import Qt, QSize, QRectF, QModelIndex, QEvent
@@ -21,6 +22,8 @@ class ChannelItemDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.image_loader = ImageLoader.instance()
+        self._scaled_logo_cache: OrderedDict[str, QPixmap] = OrderedDict()
+        self._max_scaled_cache_size = 120
         # Pré-rendu des icônes réutilisées
         self._pix_tv = get_pixmap("tv", color="#64748b", size=24)
         self._pix_movie = get_pixmap("movie", color="#64748b", size=24)
@@ -76,22 +79,31 @@ class ChannelItemDelegate(QStyledItemDelegate):
         painter.drawRoundedRect(logo_rect, 10, 10)
 
         pixmap: Optional[QPixmap] = None
+        scaled: Optional[QPixmap] = None
         if channel.logo_url:
-            pixmap = self.image_loader.get_cached_image(channel.logo_url)
-            if not pixmap:
-                self.image_loader.request_image(channel.logo_url)
+            if channel.logo_url in self._scaled_logo_cache:
+                self._scaled_logo_cache.move_to_end(channel.logo_url)
+                scaled = self._scaled_logo_cache[channel.logo_url]
+            else:
+                pixmap = self.image_loader.get_cached_image(channel.logo_url)
+                if not pixmap:
+                    self.image_loader.request_image(channel.logo_url)
+                elif not pixmap.isNull():
+                    scaled = pixmap.scaled(
+                        int(logo_rect.width() - 4),
+                        int(logo_rect.height() - 4),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    self._scaled_logo_cache[channel.logo_url] = scaled
+                    while len(self._scaled_logo_cache) > self._max_scaled_cache_size:
+                        self._scaled_logo_cache.popitem(last=False)
 
-        if pixmap and not pixmap.isNull():
+        if scaled and not scaled.isNull():
             path = QPainterPath()
             path.addRoundedRect(logo_rect.adjusted(1, 1, -1, -1), 9, 9)
             painter.save()
             painter.setClipPath(path)
-            scaled = pixmap.scaled(
-                int(logo_rect.width() - 4),
-                int(logo_rect.height() - 4),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
             px = logo_rect.left() + (logo_rect.width() - scaled.width()) / 2
             py = logo_rect.top() + (logo_rect.height() - scaled.height()) / 2
             painter.drawPixmap(int(px), int(py), scaled)

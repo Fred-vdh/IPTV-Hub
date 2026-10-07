@@ -115,20 +115,25 @@ class ChannelItemWidget(QWidget):
         if not self.channel.logo_url:
             return
 
-        loader = ImageLoader.instance()
-        loader.image_loaded.connect(self._on_image_loaded)
-        pix = loader.load_image(self.channel.logo_url)
-        if pix:
-            self._set_pixmap(pix)
-
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        if url == self.channel.logo_url:
-            self._set_pixmap(pixmap)
+        ImageLoader.instance().load_image(
+            self.channel.logo_url,
+            self._set_pixmap,
+            target=self
+        )
 
     def _set_pixmap(self, pixmap: QPixmap):
+        if not pixmap or pixmap.isNull():
+            return
         scaled = pixmap.scaled(38, 38, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         self.logo_label.setPixmap(scaled)
         self.logo_label.setText("")
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def _update_fav_style(self):
         if self.channel.is_favorite:

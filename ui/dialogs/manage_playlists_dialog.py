@@ -18,6 +18,7 @@ from core.xtream_client import XtreamClient
 from ui.icons import get_icon, DEFAULT_ICON_COLOR
 from ui.dialogs.add_playlist import AddPlaylistDialog, PlaylistImportWorker
 from core.i18n import tr, get_locale_month
+from core.qt_worker_utils import is_worker_running
 
 
 def _format_exp_date(exp_str: Optional[str]) -> str:
@@ -185,9 +186,11 @@ class PlaylistItemWidget(QFrame):
         if self.playlist.playlist_type == "xtream":
             self.status_badge = QLabel()
             self.exp_badge = QLabel()
+            self.screens_badge = QLabel()
             self.conn_badge = QLabel()
             self.account_row.addWidget(self.status_badge)
             self.account_row.addWidget(self.exp_badge)
+            self.account_row.addWidget(self.screens_badge)
             self.account_row.addWidget(self.conn_badge)
             self.account_row.addStretch()
             info_layout.addWidget(self.account_row_widget)
@@ -345,41 +348,38 @@ class PlaylistItemWidget(QFrame):
             }
         """)
 
-        # Écrans connectés / max (prise en compte du serveur Xtream ET de la lecture en cours sur l'application)
+        # 1. Nombre d'écrans autorisés par l'abonnement
         max_c = self.playlist.max_connections or "1"
-        try:
-            server_act = int(self.playlist.active_cons or 0)
-        except (ValueError, TypeError):
-            server_act = 0
+        self.screens_badge.setText(tr("Écrans : {max}", max=max_c))
+        self.screens_badge.setToolTip(tr("Nombre d'écrans autorisés par l'abonnement : {max}", max=max_c))
+        self.screens_badge.setStyleSheet("""
+            QLabel {
+                background-color: #2b364c;
+                color: #cbd5e1;
+                font-size: 11px;
+                font-weight: 500;
+                padding: 2px 8px;
+                border-radius: 4px;
+                border: 1px solid #3b4b69;
+            }
+        """)
 
-        local_act = 1 if getattr(self, "is_currently_playing", False) else 0
-        total_act = max(server_act, local_act)
-        self.conn_badge.setText(tr("Écrans : {active} / {max}", active=total_act, max=max_c))
-
-        if total_act > 0:
-            self.conn_badge.setStyleSheet("""
-                QLabel {
-                    background-color: rgba(56, 189, 248, 0.15);
-                    color: #38bdf8;
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 2px 8px;
-                    border-radius: 4px;
-                    border: 1px solid rgba(56, 189, 248, 0.35);
-                }
-            """)
-        else:
-            self.conn_badge.setStyleSheet("""
-                QLabel {
-                    background-color: #2b364c;
-                    color: #cbd5e1;
-                    font-size: 11px;
-                    font-weight: 500;
-                    padding: 2px 8px;
-                    border-radius: 4px;
-                    border: 1px solid #3b4b69;
-                }
-            """)
+        # 2. Nombre de connexions simultanées autorisées
+        self.conn_badge.setText(tr("Connexions autorisées : {max}", max=max_c))
+        self.conn_badge.setToolTip(
+            tr("Nombre de connexions simultanées autorisées par votre abonnement : {max}", max=max_c)
+        )
+        self.conn_badge.setStyleSheet("""
+            QLabel {
+                background-color: #2b364c;
+                color: #cbd5e1;
+                font-size: 11px;
+                font-weight: 500;
+                padding: 2px 8px;
+                border-radius: 4px;
+                border: 1px solid #3b4b69;
+            }
+        """)
 
     def _check_account_info(self):
         if self.playlist.playlist_type != "xtream":
@@ -390,12 +390,13 @@ class PlaylistItemWidget(QFrame):
         try:
             self._worker = _AccountWorker(self.playlist, self)
             self._worker.finished_info.connect(self._on_account_info_fetched)
+            self._worker.finished.connect(self._worker.deleteLater)
             self._worker.start()
         except Exception:
             pass
 
     def closeEvent(self, event):
-        if getattr(self, "_worker", None) and self._worker.isRunning():
+        if is_worker_running(getattr(self, "_worker", None)):
             self._worker.quit()
         super().closeEvent(event)
 
@@ -548,6 +549,7 @@ class ManagePlaylistsDialog(QDialog):
         self._sync_worker.progress.connect(self.status_label.setText)
         self._sync_worker.finished_success.connect(self._on_sync_finished)
         self._sync_worker.error.connect(self._on_sync_error)
+        self._sync_worker.finished.connect(self._sync_worker.deleteLater)
         self._sync_worker.start()
 
     def _on_sync_finished(self, _playlist_id: int):
@@ -575,7 +577,7 @@ class ManagePlaylistsDialog(QDialog):
             self._load_playlists()
 
     def closeEvent(self, event):
-        if self._sync_worker and self._sync_worker.isRunning():
+        if is_worker_running(getattr(self, "_sync_worker", None)):
             try:
                 self._sync_worker.terminate()
                 self._sync_worker.wait(500)
@@ -584,7 +586,7 @@ class ManagePlaylistsDialog(QDialog):
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             w = self.list_widget.itemWidget(item)
-            if isinstance(w, PlaylistItemWidget) and w._worker and w._worker.isRunning():
+            if isinstance(w, PlaylistItemWidget) and is_worker_running(getattr(w, "_worker", None)):
                 try:
                     w._worker.terminate()
                     w._worker.wait(500)

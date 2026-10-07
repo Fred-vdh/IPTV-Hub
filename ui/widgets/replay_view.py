@@ -19,6 +19,7 @@ from core.xtream_client import XtreamClient
 from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from core.i18n import tr, get_locale_weekday, get_locale_month
+from core.qt_worker_utils import is_worker_running
 
 
 class _ReplayEpgWorker(QThread):
@@ -211,22 +212,28 @@ class ReplayProgramCard(QFrame):
             if cached and not cached.isNull():
                 self._set_logo_pixmap(cached)
             else:
-                loader.image_loaded.connect(self._on_logo_loaded)
-                loader.request_image(url)
+                loader.load_image(url, self._set_logo_pixmap, target=self)
         else:
             self._set_fallback_icon()
 
-    def _on_logo_loaded(self, url: str, pixmap: QPixmap):
-        if self._target_logo_url and url == self._target_logo_url and not pixmap.isNull():
-            self._set_logo_pixmap(pixmap)
-
     def _set_logo_pixmap(self, pixmap: QPixmap):
+        if not pixmap or pixmap.isNull():
+            return
         scaled = pixmap.scaled(
             44, 30,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
         )
         self.logo_label.setPixmap(scaled)
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.channel = None
+        self.program = {}
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def _set_fallback_icon(self):
         fallback_pix = get_icon("live_tv", color="#475569").pixmap(22, 22)
@@ -568,21 +575,23 @@ class ReplayView(QWidget):
             loader = ImageLoader.instance()
             cached = loader.get_cached_image(ch.logo_url)
             if cached and not cached.isNull():
-                self.active_channel_logo.setPixmap(cached.scaled(32, 22, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                self._set_active_channel_logo(cached)
             else:
-                loader.image_loaded.connect(self._on_active_channel_logo_loaded)
-                loader.request_image(ch.logo_url)
+                loader.load_image(ch.logo_url, self._set_active_channel_logo, target=self)
         else:
             self.active_channel_logo.hide()
         self._load_channel_epg(ch)
 
-    def _on_active_channel_logo_loaded(self, url: str, pixmap: QPixmap):
-        if self._selected_channel and url == self._selected_channel.logo_url and not pixmap.isNull():
-            self.active_channel_logo.setPixmap(pixmap.scaled(32, 22, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+    def _set_active_channel_logo(self, pixmap: QPixmap):
+        if not pixmap or pixmap.isNull():
+            return
+        self.active_channel_logo.setPixmap(pixmap.scaled(32, 22, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def _load_channel_epg(self, channel: Channel):
         """Interroge le serveur Xtream pour récupérer la grille EPG complète de la chaîne."""
-        if self._epg_worker and self._epg_worker.isRunning():
+        # Ne jamais tester .isRunning() directement : l'objet C++ peut déjà avoir
+        # été détruit par deleteLater() (RuntimeError -> qFatal/abort).
+        if is_worker_running(getattr(self, "_epg_worker", None)):
             try:
                 self._epg_worker.finished_data.disconnect()
                 self._epg_worker.error_occurred.disconnect()
@@ -608,6 +617,7 @@ class ReplayView(QWidget):
         self._epg_worker = _ReplayEpgWorker(client, stream_id, self)
         self._epg_worker.finished_data.connect(self._on_epg_loaded)
         self._epg_worker.error_occurred.connect(self._on_epg_error)
+        self._epg_worker.finished.connect(self._epg_worker.deleteLater)
         self._epg_worker.start()
 
     def _on_epg_loaded(self, programs: list):
@@ -625,6 +635,11 @@ class ReplayView(QWidget):
 
     def _filter_programs_by_date(self):
         """Filtre les émissions pour n'afficher que celles correspondant au jour sélectionné."""
+        for i in range(self.program_list_widget.count()):
+            item = self.program_list_widget.item(i)
+            w = self.program_list_widget.itemWidget(item)
+            if w and hasattr(w, "cleanup"):
+                w.cleanup()
         self.program_list_widget.clear()
 
         if not self._all_programs:
@@ -702,7 +717,7 @@ class ReplayView(QWidget):
 
     def stop_workers(self):
         """Arrête proprement les workers d'arrière-plan."""
-        if hasattr(self, "_epg_worker") and self._epg_worker and self._epg_worker.isRunning():
+        if is_worker_running(getattr(self, "_epg_worker", None)):
             try:
                 self._epg_worker.finished_data.disconnect()
                 self._epg_worker.error_occurred.disconnect()
