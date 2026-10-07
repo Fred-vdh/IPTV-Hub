@@ -1273,14 +1273,16 @@ class MainWindow(QMainWindow):
             self._apply_layout_geometry()
             self._update_video_widget_geometry()
 
-        history = WatchHistory(
-            channel_id=channel.id or 0,
-            channel_name=channel.name,
-            stream_url=channel.stream_url,
-            logo_url=channel.logo_url,
-            group_title=channel.group_title
-        )
-        self.db.add_watch_history(history)
+        # Ne pas polluer l'historique lors du zapping des chaînes TV en direct
+        if channel.stream_type != "live":
+            history = WatchHistory(
+                channel_id=channel.id or 0,
+                channel_name=channel.name,
+                stream_url=channel.stream_url,
+                logo_url=channel.logo_url,
+                group_title=channel.group_title
+            )
+            self.db.add_watch_history(history)
 
         # Détermination du point de départ
         if start_time is None:

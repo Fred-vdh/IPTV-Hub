@@ -457,12 +457,6 @@ class RecentlyWatchedView(QWidget):
         self.btn_series.clicked.connect(lambda: self._set_stream_type("series"))
         media_layout.addWidget(self.btn_series)
 
-        self.btn_live = QPushButton(tr("TV en direct"))
-        self.btn_live.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_live.setFixedHeight(28)
-        self.btn_live.clicked.connect(lambda: self._set_stream_type("live"))
-        media_layout.addWidget(self.btn_live)
-
         top_bar.addWidget(self.media_group)
 
         # 1.2 Groupe Portée (Cette liste | Toutes les listes)
@@ -598,7 +592,6 @@ class RecentlyWatchedView(QWidget):
         self.btn_all.setStyleSheet(active_style if self.active_stream_type == "all" else inactive_style)
         self.btn_movies.setStyleSheet(active_style if self.active_stream_type == "movie" else inactive_style)
         self.btn_series.setStyleSheet(active_style if self.active_stream_type == "series" else inactive_style)
-        self.btn_live.setStyleSheet(active_style if self.active_stream_type == "live" else inactive_style)
 
         self.btn_this_playlist.setStyleSheet(active_style if not self.scope_all_playlists else inactive_style)
         self.btn_all_playlists.setStyleSheet(active_style if self.scope_all_playlists else inactive_style)
@@ -640,6 +633,7 @@ class RecentlyWatchedView(QWidget):
             search_query=self.search_query if self.search_query else None,
             limit=30
         )
+        items = [it for it in items if it.get("channel") and it["channel"].stream_type != "live"]
 
         if not items:
             self.empty_label.setVisible(True)
@@ -689,9 +683,7 @@ class RecentlyWatchedView(QWidget):
 
     def _on_clear_all_clicked(self):
         sec_name = ""
-        if self.active_stream_type == "live":
-            sec_name = "de TV en direct "
-        elif self.active_stream_type == "movie":
+        if self.active_stream_type == "movie":
             sec_name = "de films "
         elif self.active_stream_type == "series":
             sec_name = "de séries "
@@ -736,8 +728,6 @@ class RecentlyWatchedView(QWidget):
             self.btn_movies.setText(tr("Films"))
         if hasattr(self, "btn_series"):
             self.btn_series.setText(tr("Séries"))
-        if hasattr(self, "btn_live"):
-            self.btn_live.setText(tr("TV en direct"))
         if hasattr(self, "btn_this_playlist"):
             self.btn_this_playlist.setText("  " + tr("Cette liste de lecture"))
         if hasattr(self, "btn_all_playlists"):

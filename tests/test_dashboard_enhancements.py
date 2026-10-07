@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import QApplication
 from core.database import Database
 from core.models import Channel
 from ui.widgets.dashboard_view import (
-    DashboardView, HeroBannerWidget, LiveTvMiniCard, DashboardPosterCard, DashboardSection
+    DashboardView, HeroBannerWidget, DashboardPosterCard, DashboardSection
 )
 
 app = QApplication.instance() or QApplication(sys.argv)
@@ -31,17 +31,11 @@ class TestDashboardEnhancements(unittest.TestCase):
         view = DashboardView(self.db)
         self.assertIsInstance(view.hero_banner, HeroBannerWidget)
         self.assertIsInstance(view.sec_continue, DashboardSection)
-        self.assertIsInstance(view.sec_recent_live, DashboardSection)
+        self.assertFalse(hasattr(view, "sec_recent_live"), "La section TV en direct récemment regardée ne doit plus être présente")
         self.assertIsInstance(view.sec_favs, DashboardSection)
         self.assertIsInstance(view.sec_recents, DashboardSection)
 
         view.refresh_view()
-
-        live_items = self.db.get_dashboard_recent_live(limit=5)
-        if live_items:
-            mini_card = LiveTvMiniCard(live_items[0])
-            self.assertEqual(mini_card.CARD_WIDTH, 220)
-            self.assertEqual(mini_card.CARD_HEIGHT, 56)
 
     def test_dashboard_poster_card_episode_badge(self):
         ch = Channel(

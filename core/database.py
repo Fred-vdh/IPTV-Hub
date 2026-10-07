@@ -1741,7 +1741,8 @@ class Database:
         playlist_id: Optional[int] = None,
         stream_type: Optional[str] = None,
         search_query: Optional[str] = None,
-        limit: int = 30
+        limit: int = 30,
+        include_live: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Récupère l'historique complet des éléments récemment regardés,
@@ -1880,6 +1881,10 @@ class Database:
                 if dedup_key in seen_keys:
                     continue
                 seen_keys.add(dedup_key)
+
+                # Exclusion par défaut des chaînes TV en direct
+                if not include_live and st_type == "live" and stream_type != "live":
+                    continue
 
                 # Filtrage par type demandé
                 if stream_type and stream_type != "all":

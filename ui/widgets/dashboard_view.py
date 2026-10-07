@@ -1450,12 +1450,7 @@ class DashboardView(QWidget):
         self.sec_continue.see_all_clicked.connect(self.navigate_section_requested.emit)
         self.container_layout.addWidget(self.sec_continue)
 
-        # 3. Section "TV en direct récemment regardée"
-        self.sec_recent_live = DashboardSection(tr("TV en direct récemment regardée"), "live", see_all_str, content_height=58, parent=self.container_widget)
-        self.sec_recent_live.see_all_clicked.connect(self.navigate_section_requested.emit)
-        self.container_layout.addWidget(self.sec_recent_live)
-
-        # 3.bis Section "Nouveaux épisodes de vos séries favorites"
+        # 3. Section "Nouveaux épisodes de vos séries favorites"
         self.sec_new_episodes = DashboardSection(
             tr("Nouveaux épisodes de vos séries favorites"),
             "series",
@@ -1513,20 +1508,6 @@ class DashboardView(QWidget):
                 self.sec_continue.add_item(card)
         else:
             self.sec_continue.setVisible(False)
-
-        # 2. Recently watched live TV
-        live_items = self.db.get_dashboard_recent_live(playlist_id=pl_id, limit=15)
-        self.sec_recent_live.clear_items()
-        self.sec_recent_live.set_badge_count(len(live_items))
-        if live_items:
-            self.sec_recent_live.setVisible(True)
-            for l_item in live_items:
-                ch = l_item["channel"]
-                card = LiveTvMiniCard(l_item, parent=self.sec_recent_live.items_container)
-                card.clicked.connect(self.channel_selected.emit)
-                self.sec_recent_live.add_item(card)
-        else:
-            self.sec_recent_live.setVisible(False)
 
         # Ensemble des séries favorites ayant de nouveaux épisodes
         active_new_ep_ids = self.db.get_active_new_episodes_series_ids(playlist_id=pl_id)
@@ -1629,7 +1610,6 @@ class DashboardView(QWidget):
         """Filtre les sections et bannières du tableau de bord selon le texte de recherche."""
         q = query.lower().strip()
         self.sec_continue.filter_items(q)
-        self.sec_recent_live.filter_items(q)
         if hasattr(self, "sec_new_episodes"):
             self.sec_new_episodes.filter_items(q)
         self.sec_favs.filter_items(q)
@@ -1654,10 +1634,6 @@ class DashboardView(QWidget):
         if hasattr(self, "sec_continue"):
             self.sec_continue.title_label.setText(tr("Reprendre la lecture"))
             self.sec_continue.set_see_all_text(see_all_str)
-
-        if hasattr(self, "sec_recent_live"):
-            self.sec_recent_live.title_label.setText(tr("TV en direct récemment regardée"))
-            self.sec_recent_live.set_see_all_text(see_all_str)
 
         if hasattr(self, "sec_new_episodes"):
             self.sec_new_episodes.title_label.setText(tr("Nouveaux épisodes de vos séries favorites"))
