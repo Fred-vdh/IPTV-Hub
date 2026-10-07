@@ -45,8 +45,8 @@ def main():
     from core.version import __version__
     tag_name = f"v{__version__}"
 
-    # 2. Création de la Release v2.3.0
-    release_body = f"""## 🚀 IPTV Hub {tag_name} - Gestionnaire de téléchargements VOD & Séries, chapitrage interactif et confort de lecture
+    # 2. Création de la Release v2.3.1
+    release_body = f"""## 🚀 IPTV Hub {tag_name} - Stabilité du lecteur, Multiview enrichi et confort de visionnage
 
 Bienvenue dans la version **{__version__}** d'**IPTV Hub**, le lecteur multimédia IPTV & VOD moderne, rapide et élégant propulsé nativement par PyQt6 et libmpv !
 
@@ -54,31 +54,25 @@ Bienvenue dans la version **{__version__}** d'**IPTV Hub**, le lecteur multiméd
 
 ### ✨ Nouveautés & Améliorations de cette version :
 
-1. **📥 Gestionnaire de Téléchargements VOD & Séries (Mode Hors-ligne)** :
-   - Enregistrez vos films et séries préférés en un clic directement depuis leur fiche de détails.
-   - File d'attente FIFO intelligente (un seul flux simultané pour préserver votre abonnement IPTV).
-   - Reprise automatique des téléchargements interrompus via requêtes `HTTP Range`.
-   - Nouvelle section dédiée **Téléchargements** dans la barre latérale sous *Récemment ajouté*, avec onglets *En cours* et *Terminés*.
-   - Choix du dossier de destination des vidéos et limitation optionnelle du débit dans les Paramètres (*Données & Téléchargements*).
-   - Débit de téléchargement optimisé (chunks 128 Ko et régulation fine de bande passante).
+1. **🛡️ Robustesse native & Anti-crash (Windows & Linux)** :
+   - Refonte du cycle de vie des workers Qt (`qt_worker_utils`) avec suivi natif des threads et protection contre les destructions asynchrones C++.
+   - Isolation du thread libmpv : marshaling sécurisé des callbacks et observateurs vers la boucle d'événements Qt via file protégée et pompage non-bloquant.
+   - Gestionnaire VEH minimaliste (`native_crash_log`) remplaçant faulthandler pour une traçabilité claire des anomalies sans conflit avec les SEH internes de libmpv.
 
-2. **🎞️ Chapitrage & Marqueurs interactifs sur la timeline vidéo** :
-   - Détection et extraction automatique des chapitres intégrés aux conteneurs vidéo (MKV, MP4).
-   - Marqueurs visuels discrets sur la barre de progression respectant fidèlement la charte graphique.
-   - Infobulles ergonomiques au survol affichant le titre du chapitre et le timer précis, sans aucun scintillement d'affichage.
+2. **📺 Mode Multiview perfectionné (Multi-écrans TV)** :
+   - Sortie du Multiview fiabilisée avec libération étalée des ressources vidéo pour éviter tout gel d'affichage.
+   - Sélecteur de chaîne repensé avec scopes clairs : toutes les chaînes, listes personnalisées et catégories.
+   - Bandeau d'information OSD complet sur chaque écran avec EPG, badge dynamique et raccourcis d'édition/suppression.
+   - Masquage automatique du bouton Multiview de la barre de contrôle hors de la télévision en direct (films, séries, replays).
 
-3. **📻 Filtrage des catégories & Radios fiabilisé** :
-   - Sauvegarde pérenne des sélections de catégories dans la boîte de dialogue de gestion des catégories.
-   - Prise en charge complète des bouquets de stations de radios en direct sans réinitialisation involontaire.
+3. **🎬 Suivi de visionnage & Reprise de lecture intelligente** :
+   - Reprise de lecture des séries optimisée pour repartir automatiquement du premier épisode non vu le plus ancien.
+   - Chaîne de repli d'URL multi-hôtes pour les vignettes d'épisodes de séries manquantes.
+   - Fiabilisation complète de la reprise des films : isolation des déclencheurs d'intro/outro pour éviter tout marquage prématuré à 100%.
 
-4. **🎬 Ergonomie des fiches de détails & Reprise de lecture** :
-   - Fiches de films et séries : suppression des boutons redondants pour une interface épurée (*Reprendre du début* unique et clair).
-   - Curseur contextuel optimisé (main cliquable uniquement sur les éléments interactifs).
-   - Masquage automatique des bandes-annonces pendant la lecture vidéo pour économiser les ressources.
-
-5. **⚡ Optimisations sous le capot & Stabilité** :
-   - Résolution de conflits de signaux Qt sous Windows et fiabilisation des threads de fond.
-   - Mises à jour des traductions françaises et anglaises.
+4. **✨ Épuration de l'interface & Ergonomie** :
+   - Épuration du Tableau de bord et de l'onglet Récemment regardé : suppression des chaînes TV en direct pour éliminer la pollution liée au zapping.
+   - Navigation fluide et retour contextualisé depuis les fiches de détails.
 
 ---
 

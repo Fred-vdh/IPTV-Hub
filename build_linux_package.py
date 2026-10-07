@@ -89,7 +89,7 @@ def should_include_file(path: Path) -> bool:
     # Exclure fichiers spécifiques Windows ou temporaires
     if path.suffix in (".exe", ".dll", ".spec", ".bak", ".log", ".iss"):
         return False
-    if "CASSE" in path.name or "Copie" in path.name:
+    if "CASSE" in path.name or "Copie" in path.name or "PASSATION" in path.name:
         return False
     return True
 
