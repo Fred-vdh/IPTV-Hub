@@ -2015,10 +2015,10 @@ class Database:
             else:
                 saved_pos = position
 
-            # Si l'élément était déjà marqué comme terminé (100%), une lecture brève ou fugitive (< 90%)
-            # ne doit pas écraser ou dévalider ce statut terminé (seul un clic explicite sur la coche le fait)
+            # Si l'élément était déjà marqué comme terminé (100%), une lecture fugitive (< 10 s)
+            # ne doit pas écraser ou dévalider ce statut terminé.
             if existing and existing_dur > 0 and (existing_pos >= existing_dur * 0.90 or (existing_dur >= 180 and existing_pos >= 120 and (existing_dur - existing_pos) <= 60)):
-                if saved_pos < effective_dur * 0.90 and not (effective_dur >= 180 and saved_pos >= 120 and (effective_dur - saved_pos) <= 60):
+                if saved_pos < 10.0 and saved_pos < effective_dur * 0.90:
                     return
 
             if saved_pos >= 5.0 or (effective_dur > 0 and saved_pos >= effective_dur * 0.90):

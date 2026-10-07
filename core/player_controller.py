@@ -573,6 +573,8 @@ class PlayerController(QObject):
     # Observateurs MPV -> Émission de signaux Qt sécurisés multi-thread
     @_mpv_callback_in_qt_thread
     def _on_time_pos(self, name, value):
+        if getattr(self, "_is_stopping", False):
+            return
         if value is not None:
             val = float(value)
             self._stream_has_started = True
@@ -588,6 +590,8 @@ class PlayerController(QObject):
 
     @_mpv_callback_in_qt_thread
     def _on_duration(self, name, value):
+        if getattr(self, "_is_stopping", False):
+            return
         if value is not None and value > 0:
             self._is_vod = True
             self.duration_changed.emit(float(value))
@@ -908,6 +912,8 @@ class PlayerController(QObject):
         if not self._player or not url:
             return
 
+        self._is_stopping = False
+
         if self._current_url and self._player:
             try:
                 self._player.command("stop")
@@ -1007,6 +1013,11 @@ class PlayerController(QObject):
 
     def stop(self):
         self._is_stopping = True
+        gui_lock = getattr(self, "_gui_calls_lock", None)
+        if gui_lock:
+            with gui_lock:
+                if hasattr(self, "_gui_calls"):
+                    self._gui_calls.clear()
         if self._stream_watchdog.isActive():
             self._stream_watchdog.stop()
         if self._stall_monitor.isActive():
@@ -1028,7 +1039,6 @@ class PlayerController(QObject):
                 self.chapters_changed.emit([])
             except Exception:
                 pass
-        self._is_stopping = False
 
     def seek(self, seconds: float, relative: bool = False):
         self._eof_reported = False

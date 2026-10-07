@@ -970,12 +970,14 @@ class MainWindow(QMainWindow):
                 self._last_progress_saved_time = now
                 self._save_current_playback_progress()
 
-        # Détection précise du générique de début (IntroDB) pour le bouton "Passer le générique"
+        # Détection précise du générique de début (IntroDB) pour le bouton "Passer le générique" (Séries uniquement)
         intro_start = getattr(self, "_current_intro_start_sec", None)
         intro_end = getattr(self, "_current_intro_end_sec", None)
         intro_cancelled = getattr(self, "_intro_overlay_cancelled", False)
         if (
-            intro_start is not None
+            self.current_channel
+            and self.current_channel.stream_type == "series"
+            and intro_start is not None
             and intro_end is not None
             and not intro_cancelled
             and getattr(self.settings, "introdb_intro_skip", True)
@@ -991,11 +993,13 @@ class MainWindow(QMainWindow):
             elif (pos >= intro_end or pos < intro_start - 2.0) and intro_overlay.isVisible():
                 intro_overlay.hide()
 
-        # Détection précise du générique de fin (IntroDB) pour l'overlay d'enchaînement avec compte à rebours 10s
+        # Détection précise du générique de fin (IntroDB) pour l'overlay d'enchaînement avec compte à rebours 10s (Séries uniquement)
         outro_start = getattr(self, "_current_outro_start_sec", None)
         outro_cancelled = getattr(self, "_outro_overlay_cancelled", False)
         if (
-            outro_start is not None
+            self.current_channel
+            and self.current_channel.stream_type == "series"
+            and outro_start is not None
             and not outro_cancelled
             and getattr(self.settings, "auto_play_next_episode", True)
             and getattr(self.settings, "introdb_outro_skip", True)
@@ -1160,7 +1164,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, "video_widget") and hasattr(self.video_widget, "next_ep_overlay"):
             self.video_widget.next_ep_overlay.reset()
 
-        if self.current_channel and self._current_playback_dur > 0:
+        if not self.current_channel or self.current_channel.stream_type != "series":
+            return
+
+        if self._current_playback_dur > 0:
             self.db.save_playback_progress(
                 channel_id=self.current_channel.id,
                 stream_url=self.current_channel.stream_url,
@@ -2358,6 +2365,18 @@ class MainWindow(QMainWindow):
         self._current_playback_pos = start_pos
         self._current_playback_dur = 0.0
         self._last_progress_saved_time = 0.0
+
+        # Réinitialisation stricte des marqueurs d'épisode de série (intro / outro)
+        self._current_outro_start_sec = None
+        self._outro_overlay_cancelled = False
+        self._current_intro_start_sec = None
+        self._current_intro_end_sec = None
+        self._intro_overlay_cancelled = False
+        if hasattr(self, "video_widget"):
+            if hasattr(self.video_widget, "next_ep_overlay"):
+                self.video_widget.next_ep_overlay.reset()
+            if hasattr(self.video_widget, "skip_intro_overlay"):
+                self.video_widget.skip_intro_overlay.hide()
 
         ua = channel.user_agent or self.settings.user_agent
         self.player_controller.play(
