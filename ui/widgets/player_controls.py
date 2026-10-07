@@ -250,6 +250,7 @@ class PlayerControls(QWidget):
     audio_track_selected = pyqtSignal(int)
     subtitle_track_selected = pyqtSignal(int)
     auto_next_toggled = pyqtSignal(bool)
+    multiview_toggled = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -681,6 +682,16 @@ class PlayerControls(QWidget):
         self.sub_btn.setToolTip("Sous-titres")
         self.sub_btn.clicked.connect(self._show_subtitles_menu)
         ctrl_row.addWidget(self.sub_btn)
+
+        # Multiview (dashboard / grid_view)
+        self.multiview_btn = QPushButton()
+        self.multiview_btn.setIcon(get_icon("dashboard", color=DEFAULT_ICON_COLOR))
+        self.multiview_btn.setIconSize(QSize(20, 20))
+        self.multiview_btn.setProperty("class", "osd-btn")
+        self.multiview_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.multiview_btn.setToolTip("Mode Multiview (Multi-écrans)")
+        self.multiview_btn.clicked.connect(self.multiview_toggled.emit)
+        ctrl_row.addWidget(self.multiview_btn)
 
         # Plein écran (fullscreen)
         self.fs_btn = QPushButton()
