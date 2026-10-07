@@ -683,7 +683,7 @@ class PlayerControls(QWidget):
         self.sub_btn.clicked.connect(self._show_subtitles_menu)
         ctrl_row.addWidget(self.sub_btn)
 
-        # Multiview (dashboard / grid_view)
+        # Multiview (dashboard / grid_view) - réservé à la TV en direct
         self.multiview_btn = QPushButton()
         self.multiview_btn.setIcon(get_icon("dashboard", color=DEFAULT_ICON_COLOR))
         self.multiview_btn.setIconSize(QSize(20, 20))
@@ -691,6 +691,7 @@ class PlayerControls(QWidget):
         self.multiview_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.multiview_btn.setToolTip("Mode Multiview (Multi-écrans)")
         self.multiview_btn.clicked.connect(self.multiview_toggled.emit)
+        self.multiview_btn.setVisible(False)
         ctrl_row.addWidget(self.multiview_btn)
 
         # Plein écran (fullscreen)
@@ -979,6 +980,10 @@ class PlayerControls(QWidget):
             self.prev_btn.setVisible(False)
             self.next_btn.setVisible(False)
             self.auto_next_btn.setVisible(False)
+
+        # Le mode Multiview est exclusivement réservé à la TV en direct
+        if hasattr(self, "multiview_btn"):
+            self.multiview_btn.setVisible(channel.stream_type == "live")
 
         self._update_top_bar_elision()
 

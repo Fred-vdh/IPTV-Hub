@@ -384,5 +384,36 @@ class TestMultiView(unittest.TestCase):
         self.assertEqual(asked, ["TF1.fr"])
         mv.stop_all()
 
+    def test_multiview_btn_visible_only_for_live_tv(self):
+        """Le bouton Multiview de l'OSD solo ne doit être visible que pour la TV en direct."""
+        from ui.widgets.player_controls import PlayerControls
+        ctrl = PlayerControls()
+        ctrl.show()
+
+        live_ch = Channel(name="TF1", stream_url="http://x/live.ts", stream_type="live")
+        movie_ch = Channel(name="Matrix", stream_url="http://x/movie.mp4", stream_type="movie")
+        series_ch = Channel(name="Breaking Bad S01E01", stream_url="http://x/ep.mkv", stream_type="series")
+        replay_ch = Channel(name="JT 20h", stream_url="http://x/replay.ts", stream_type="replay")
+        trailer_ch = Channel(name="Trailer", stream_url="http://x/trailer.mp4", stream_type="trailer")
+
+        ctrl.update_channel_info(live_ch)
+        self.assertTrue(ctrl.multiview_btn.isVisible())
+
+        ctrl.update_channel_info(movie_ch)
+        self.assertFalse(ctrl.multiview_btn.isVisible())
+
+        ctrl.update_channel_info(series_ch)
+        self.assertFalse(ctrl.multiview_btn.isVisible())
+
+        ctrl.update_channel_info(replay_ch)
+        self.assertFalse(ctrl.multiview_btn.isVisible())
+
+        ctrl.update_channel_info(trailer_ch)
+        self.assertFalse(ctrl.multiview_btn.isVisible())
+
+        ctrl.update_channel_info(live_ch)
+        self.assertTrue(ctrl.multiview_btn.isVisible())
+
+
 if __name__ == "__main__":
     unittest.main()
