@@ -7,6 +7,7 @@ vus ainsi que sur les boutons de saisons complétées à 100%.
 """
 
 import re
+from collections import deque
 from typing import Optional, Dict, Any, List, Tuple
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -25,6 +26,7 @@ from core.image_loader import ImageLoader
 from ui.icons import get_icon
 from ui.widgets.rounded_poster import RoundedPosterLabel
 from core.i18n import tr
+from core.qt_worker_utils import stop_worker, stop_tracked_worker, track_worker
 
 
 # Cache mémoire des informations de séries pour un affichage instantané (0ms) lors de la navigation
@@ -140,7 +142,8 @@ class EpisodeCardWidget(QWidget):
         is_current_playing: bool = False,
         fallback_urls: Optional[List[str]] = None,
         parent: Optional[QWidget] = None,
-        is_new: bool = False
+        is_new: bool = False,
+        host_candidates: Optional[List[str]] = None
     ):
         super().__init__(parent)
         self.episode = episode
@@ -150,7 +153,14 @@ class EpisodeCardWidget(QWidget):
         self.is_current_playing = is_current_playing
         self.is_new = is_new
         self.fallback_urls = [u for u in (fallback_urls or []) if u]
-        self._current_fallback_idx = 0
+        # URLs d'images connues de la série : permet de basculer vers un autre domaine du fournisseur
+        self.host_candidates = [u for u in (host_candidates or []) if u]
+        self._candidate_urls: List[str] = []
+        self._candidate_idx = 0
+        self._variant_queue: deque = deque()
+        self._attempts = 0
+        # Plafond de sécurité : 4 visuels candidats x (1 URL + ses variantes de domaine)
+        self._max_attempts = 12
         self._active_loading_url = ""
         self.is_hovered = False
         self._check_hovered = False
@@ -256,48 +266,101 @@ class EpisodeCardWidget(QWidget):
             url = url[0]
         return ImageLoader.normalize_url(str(url)) if url else ""
 
+    def _build_candidate_chain(self) -> List[str]:
+        """Chaîne des visuels à tenter : vignette de l'épisode, puis replis de la série."""
+        chain: List[str] = []
+        primary = self._get_thumb_url()
+        if primary:
+            chain.append(primary)
+        for fb in self.fallback_urls:
+            fb_url = ImageLoader.normalize_url(fb)
+            if fb_url and fb_url.startswith("http") and fb_url not in chain:
+                chain.append(fb_url)
+        return chain
+
     def _load_thumbnail(self):
-        thumb_url = self._get_thumb_url()
-        loader = ImageLoader.instance()
-        loader.image_loaded.connect(self._on_image_loaded)
-        loader.image_failed.connect(self._on_image_failed)
+        """Démarre le chargement de la vignette (épisode puis replis, avec bascule de domaine)."""
+        self._candidate_urls = self._build_candidate_chain()
+        self._candidate_idx = 0
+        self._next_candidate()
 
-        if thumb_url and thumb_url.startswith("http"):
-            self._active_loading_url = thumb_url
-            cached = loader.get_cached_image(thumb_url)
-            if cached:
-                self.pixmap = cached
-                self.thumb_container.update()
+    def _next_candidate(self):
+        """Tente le candidat suivant ; laisse l'image par défaut si toute la chaîne échoue."""
+        while self._candidate_idx < len(self._candidate_urls):
+            url = self._candidate_urls[self._candidate_idx]
+            self._candidate_idx += 1
+            self._variant_queue = deque(ImageLoader.alternate_host_urls(url, self.host_candidates))
+            if self._request_thumbnail(url):
                 return
-            loader.request_image_priority(thumb_url)
-        else:
-            self._try_next_fallback()
+        self._active_loading_url = ""
 
-    def _try_next_fallback(self):
+    def _next_variant(self) -> bool:
+        """Réessaie la même image servie par un autre domaine d'images du fournisseur.
+
+        Certains fournisseurs Xtream renvoient des visuels sur un domaine hors service (HTTP 404)
+        alors que le même fichier est bien servi, au même chemin, par le domaine qui héberge
+        l'affiche de la série : sans cette bascule, la vignette restait sur l'image par défaut.
+        """
+        while self._variant_queue:
+            variant = self._variant_queue.popleft()
+            if variant in self._candidate_urls:
+                continue
+            if self._request_thumbnail(variant):
+                return True
+        return False
+
+    def _request_thumbnail(self, url: str) -> bool:
+        """Charge une URL de vignette en notifiant succès et échec (pour enchaîner les replis)."""
+        url = ImageLoader.normalize_url(url) if url else ""
+        if not url.startswith("http") or self._attempts >= self._max_attempts:
+            return False
+        self._attempts += 1
+        self._active_loading_url = url
         loader = ImageLoader.instance()
-        while self._current_fallback_idx < len(self.fallback_urls):
-            fb_url = ImageLoader.normalize_url(self.fallback_urls[self._current_fallback_idx])
-            self._current_fallback_idx += 1
-            if fb_url and fb_url.startswith("http"):
-                self._active_loading_url = fb_url
-                cached = loader.get_cached_image(fb_url)
-                if cached:
-                    self.pixmap = cached
-                    self.thumb_container.update()
-                    return
-                loader.request_image_priority(fb_url)
-                return
+        cached = loader.get_cached_image(url)
+        if cached:
+            self._apply_pixmap(cached)
+            return True
+        loader.load_image(
+            url,
+            self._on_thumb_loaded,
+            target=self,
+            priority=True,
+            on_failed=self._on_thumb_failed,
+        )
+        return True
 
-    def _on_image_loaded(self, url: str, pixmap: QPixmap):
-        if url and self._active_loading_url and url == self._active_loading_url:
-            self.pixmap = pixmap
-            self._scaled_pixmap = None
-            self.thumb_container.update()
-            self.update()
+    def _apply_pixmap(self, pixmap: QPixmap):
+        self.pixmap = pixmap
+        self._scaled_pixmap = None
+        self.thumb_container.update()
+        self.update()
 
-    def _on_image_failed(self, url: str):
-        if url and self._active_loading_url and url == self._active_loading_url:
-            self._try_next_fallback()
+    def _on_thumb_loaded(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
+            self._apply_pixmap(pixmap)
+
+    def _on_thumb_failed(self, url: str):
+        """Image indisponible : tente un autre domaine, sinon le visuel de repli suivant."""
+        if url and self._active_loading_url and url != self._active_loading_url:
+            return
+        if self._next_variant():
+            return
+        self._next_candidate()
+
+    def cleanup(self):
+        ImageLoader.instance().cancel_target(self)
+        self.pixmap = None
+        self._scaled_pixmap = None
+        self.episode = {}
+        self._candidate_urls = []
+        self._candidate_idx = 0
+        self._variant_queue.clear()
+        self._active_loading_url = ""
+
+    def closeEvent(self, event):
+        self.cleanup()
+        super().closeEvent(event)
 
     def set_current_playing(self, is_playing: bool):
         if self.is_current_playing != is_playing:
@@ -562,6 +625,8 @@ class SeriesDetailsView(QWidget):
 
         self._backdrop_pixmap: Optional[QPixmap] = None
         self._poster_pixmap: Optional[QPixmap] = None
+        self._backdrop_loading_url: str = ""
+        self._backdrop_variant_tried: bool = False
         self._worker: Optional[SeriesInfoWorker] = None
         self._trailer_worker: Optional[_SeriesTrailerLookupWorker] = None
         self._video_widget = None
@@ -1055,25 +1120,27 @@ class SeriesDetailsView(QWidget):
         self.current_season = ""
         self.all_episodes_flat = []
         self._marked_watched_episodes.clear()
+        self._backdrop_loading_url = ""
+        self._backdrop_variant_tried = False
 
-        # Arrêt sécurisé du worker de données précédent s'il était en cours d'exécution
-        if hasattr(self, "_worker") and self._worker and self._worker.isRunning():
+        # Arrêt sécurisé des workers précédents (même si leur objet C++ a déjà été détruit)
+        worker = getattr(self, "_worker", None)
+        if worker is not None:
             try:
-                self._worker.finished.disconnect()
-                self._worker.error.disconnect()
+                worker.finished.disconnect()
+                worker.error.disconnect()
             except Exception:
                 pass
-            self._worker.requestInterruption()
-            self._worker.wait(200)
+            stop_worker(worker, 200)
             self._worker = None
 
-        if hasattr(self, "_trailer_worker") and self._trailer_worker and self._trailer_worker.isRunning():
+        trailer_worker = getattr(self, "_trailer_worker", None)
+        if trailer_worker is not None:
             try:
-                self._trailer_worker.finished_trailer.disconnect()
+                trailer_worker.finished_trailer.disconnect()
             except Exception:
                 pass
-            self._trailer_worker.requestInterruption()
-            self._trailer_worker.wait(200)
+            stop_worker(trailer_worker, 200)
             self._trailer_worker = None
 
         self._current_trailer_id = ""
@@ -1096,12 +1163,16 @@ class SeriesDetailsView(QWidget):
             item = self.seasons_tabs_layout.takeAt(0)
             widget = item.widget()
             if widget:
+                if hasattr(widget, "cleanup"):
+                    widget.cleanup()
                 widget.deleteLater()
 
         while self.episodes_grid.count():
             item = self.episodes_grid.takeAt(0)
             widget = item.widget()
             if widget:
+                if hasattr(widget, "cleanup"):
+                    widget.cleanup()
                 widget.deleteLater()
 
         self._update_sections_order(video_playing=False)
@@ -1136,8 +1207,7 @@ class SeriesDetailsView(QWidget):
                 self.poster_label.setPixmap(cached)
             else:
                 self.poster_label.clear()
-                ImageLoader.instance().image_loaded.connect(self._on_poster_loaded)
-                ImageLoader.instance().request_image_priority(channel.logo_url)
+                ImageLoader.instance().load_image(channel.logo_url, self._set_poster_pixmap, target=self, priority=True)
         else:
             self.poster_label.clear()
 
@@ -1165,10 +1235,14 @@ class SeriesDetailsView(QWidget):
                 username=self.playlist.username,
                 password=self.playlist.password
             )
-            self._worker = SeriesInfoWorker(client, channel.stream_id, self)
-            self._worker.finished.connect(lambda data, ck=cache_key: self._handle_series_data_loaded(ck, data))
-            self._worker.error.connect(self._on_series_data_error)
-            self._worker.start()
+            worker = SeriesInfoWorker(client, channel.stream_id, self)
+            worker.finished.connect(lambda data, ck=cache_key: self._handle_series_data_loaded(ck, data))
+            worker.error.connect(self._on_series_data_error)
+            # track_worker : deleteLater() + purge de la référence Python dès que
+            # l'objet C++ disparaît, sinon "self._worker.isRunning()" lève
+            # RuntimeError: wrapped C/C++ object ... has been deleted -> qFatal/abort.
+            track_worker(self, "_worker", worker)
+            worker.start()
 
     def _handle_series_data_loaded(self, cache_key: Tuple[int, str], data: Dict[str, Any]):
         """Met en cache SQLite et mémoire les données reçues et rafraîchit l'affichage si la série est toujours sélectionnée."""
@@ -1196,14 +1270,59 @@ class SeriesDetailsView(QWidget):
             if prev_season and prev_season in self.episodes_by_season:
                 self._on_season_tab_clicked(prev_season)
 
-    def _on_poster_loaded(self, url: str, pixmap: QPixmap):
-        if self.channel and url == self.channel.logo_url:
+    def _set_poster_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
             self._poster_pixmap = pixmap
             self.poster_label.setPixmap(pixmap)
 
+    def _on_poster_loaded(self, url: str, pixmap: QPixmap):
+        self._set_poster_pixmap(pixmap)
+
+    def _set_backdrop_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
+            self._backdrop_pixmap = pixmap
+            self.hero_banner.update()
+
     def _on_backdrop_loaded(self, url: str, pixmap: QPixmap):
-        self._backdrop_pixmap = pixmap
-        self.hero_banner.update()
+        self._set_backdrop_pixmap(pixmap)
+
+    def _load_backdrop_image(self, url: str, allow_host_variant: bool = True):
+        """Charge l'image de fond en basculant de domaine si le visuel fourni par l'API échoue.
+
+        Même cause que pour les vignettes d'épisodes : l'API peut renvoyer le backdrop sur un
+        domaine hors service alors que le fichier est servi par celui de l'affiche de la série.
+        """
+        url = ImageLoader.normalize_url(url)
+        if not url.startswith("http"):
+            return
+        loader = ImageLoader.instance()
+        cached = loader.get_cached_image(url)
+        if cached:
+            self._set_backdrop_pixmap(cached)
+            return
+        self._backdrop_loading_url = url
+        self._backdrop_variant_tried = not allow_host_variant
+        loader.load_image(
+            url,
+            self._set_backdrop_pixmap,
+            target=self,
+            on_failed=self._on_backdrop_failed,
+        )
+
+    def _on_backdrop_failed(self, url: str):
+        """Backdrop indisponible : tente le même visuel sur un autre domaine d'images connu."""
+        if url and self._backdrop_loading_url and url != self._backdrop_loading_url:
+            return
+        if self._backdrop_variant_tried:
+            return
+        self._backdrop_variant_tried = True
+        variants = ImageLoader.alternate_host_urls(
+            url or self._backdrop_loading_url,
+            self._collect_known_image_urls(),
+            limit=1,
+        )
+        if variants:
+            self._load_backdrop_image(variants[0], allow_host_variant=False)
 
     def _on_series_data_loaded(self, data: Dict[str, Any]):
         self.series_data = data
@@ -1260,13 +1379,7 @@ class SeriesDetailsView(QWidget):
             if isinstance(backdrop_url, list) and backdrop_url:
                 backdrop_url = backdrop_url[0]
             if backdrop_url:
-                cached = ImageLoader.instance().get_cached_image(backdrop_url)
-                if cached:
-                    self._backdrop_pixmap = cached
-                    self.hero_banner.update()
-                else:
-                    ImageLoader.instance().image_loaded.connect(self._on_backdrop_loaded)
-                    ImageLoader.instance().request_image(backdrop_url)
+                self._load_backdrop_image(backdrop_url)
 
         # Extraction des affiches de saisons (cover / cover_big)
         self.season_covers = {}
@@ -1354,7 +1467,7 @@ class SeriesDetailsView(QWidget):
             self._setup_trailer(orig_trailer, name="Bande-annonce d'origine", badge="VO")
 
         pref_lang = self.db.get_settings().preferred_audio_lang
-        self._trailer_worker = _SeriesTrailerLookupWorker(
+        trailer_worker = _SeriesTrailerLookupWorker(
             tmdb_id=tmdb_id,
             title=title,
             year=year,
@@ -1362,8 +1475,9 @@ class SeriesDetailsView(QWidget):
             orig_trailer=orig_trailer,
             parent=None,
         )
-        self._trailer_worker.finished_trailer.connect(self._on_trailer_resolved)
-        self._trailer_worker.start()
+        trailer_worker.finished_trailer.connect(self._on_trailer_resolved)
+        track_worker(self, "_trailer_worker", trailer_worker)
+        trailer_worker.start()
 
     def _on_trailer_resolved(self, data: dict):
         if not data or not data.get("key"):
@@ -1409,19 +1523,16 @@ class SeriesDetailsView(QWidget):
         if cached:
             self.trailer_thumb_label.setPixmap(cached)
         else:
-            ImageLoader.instance().image_loaded.connect(self._on_trailer_thumb_loaded)
-            ImageLoader.instance().request_image_priority(thumb_url)
+            ImageLoader.instance().load_image(thumb_url, self._set_trailer_thumb, target=self, priority=True)
 
         if not getattr(self, "_is_video_playing", False) and not getattr(self, "_video_widget", None):
             self.trailer_section.show()
         else:
             self.trailer_section.hide()
 
-    def _on_trailer_thumb_loaded(self, url: str, pixmap: QPixmap):
-        if hasattr(self, "_current_trailer_id") and self._current_trailer_id:
-            expected = f"https://img.youtube.com/vi/{self._current_trailer_id}/hqdefault.jpg"
-            if url == expected:
-                self.trailer_thumb_label.setPixmap(pixmap)
+    def _set_trailer_thumb(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
+            self.trailer_thumb_label.setPixmap(pixmap)
 
     def _on_play_trailer_clicked(self):
         if hasattr(self, "_current_trailer_id") and self._current_trailer_id:
@@ -1767,6 +1878,8 @@ class SeriesDetailsView(QWidget):
             item = self.episodes_grid.takeAt(0)
             widget = item.widget()
             if widget:
+                if hasattr(widget, "cleanup"):
+                    widget.cleanup()
                 widget.deleteLater()
 
         episodes = self.episodes_by_season.get(self.current_season, [])
@@ -1810,6 +1923,10 @@ class SeriesDetailsView(QWidget):
         if series_cover and series_cover not in fallback_urls:
             fallback_urls.append(str(series_cover).strip())
 
+        # Domaines d'images connus du fournisseur pour cette série : permet aux vignettes de
+        # basculer sur un autre domaine si celui renvoyé par l'API est hors service (404).
+        host_candidates = self._collect_known_image_urls()
+
         for idx, ep in enumerate(episodes):
             row = idx // col_count
             col = idx % col_count
@@ -1825,6 +1942,7 @@ class SeriesDetailsView(QWidget):
                 progress_ratio=prog_ratio,
                 is_current_playing=is_cur_playing,
                 fallback_urls=fallback_urls,
+                host_candidates=host_candidates,
                 parent=self.seasons_container,
                 is_new=bool(ep_id in new_ep_ids)
             )
@@ -1832,6 +1950,40 @@ class SeriesDetailsView(QWidget):
             card.toggle_watched_clicked.connect(self._on_episode_toggle_watched)
             card.download_clicked.connect(self._on_episode_download_clicked)
             self.episodes_grid.addWidget(card, row, col, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+    def _collect_known_image_urls(self) -> List[str]:
+        """Toutes les URLs d'images connues pour la série courante (affiche, saisons, backdrop, épisodes).
+
+        Sert de référence pour la bascule de domaine des vignettes : plusieurs fournisseurs Xtream
+        renvoient les visuels de certains épisodes sur un domaine hors service (HTTP 404) alors que
+        le même fichier est servi par le domaine de l'affiche de la série. Les domaines valides du
+        fournisseur sont donc déduits de ces URLs, l'affiche (déjà affichée) étant testée en premier.
+        """
+        urls: List[str] = []
+
+        def _add(value):
+            values = value if isinstance(value, (list, tuple, set)) else [value]
+            for item in values:
+                url = ImageLoader.normalize_url(str(item or ""))
+                if url.startswith("http") and url not in urls:
+                    urls.append(url)
+
+        if self.channel:
+            _add(self.channel.logo_url)
+
+        info = self.series_data.get("info", {}) if isinstance(self.series_data, dict) else {}
+        if isinstance(info, dict):
+            for key in ("cover", "cover_big", "movie_image", "backdrop_path", "fanart"):
+                _add(info.get(key))
+
+        for cover in (self.season_covers or {}).values():
+            _add(cover)
+
+        for ep in (self.all_episodes_flat or []):
+            ep_info = ep.get("info", {}) if isinstance(ep.get("info"), dict) else {}
+            _add(ep_info.get("movie_image") or ep_info.get("cover"))
+
+        return urls
 
     def _on_episode_download_clicked(self, ep_dict: Dict[str, Any], season_num: str):
         """Lance le téléchargement d'un épisode de série via le DownloadManager."""
@@ -2054,41 +2206,34 @@ class SeriesDetailsView(QWidget):
         if not self.all_episodes_flat:
             return None, "none"
 
-        active_indices = []
+        # Cible = PREMIER épisode non terminé dans l'ordre de la série.
+        # Cette approche respecte le recul voulu par l'utilisateur : s'il remet des
+        # épisodes en « non lu » (coche), la reprise repart de l'épisode non lu le plus
+        # en arrière, et non du dernier épisode vu/entamé.
+        first_unwatched_idx = None
         for idx, ep in enumerate(self.all_episodes_flat):
-            prog_ratio, is_w = self._get_episode_progress(ep, progress_map)
-            if is_w or prog_ratio > 0.0:
-                active_indices.append(idx)
+            _ratio, is_w = self._get_episode_progress(ep, progress_map)
+            if not is_w:
+                first_unwatched_idx = idx
+                break
 
-        if not active_indices:
-            return self._get_first_episode(), "start"
+        if first_unwatched_idx is None:
+            # Tous les épisodes de la série sont vus
+            return self._get_first_episode(), "restart"
 
-        # Dernier épisode ayant eu une activité
-        last_active_idx = max(active_indices)
-        last_active_ep = self.all_episodes_flat[last_active_idx]
-        prog_ratio, is_w = self._get_episode_progress(last_active_ep, progress_map)
+        target_ep = self.all_episodes_flat[first_unwatched_idx]
+        prog_ratio, _is_w = self._get_episode_progress(target_ep, progress_map)
 
-        if 0.0 < prog_ratio < 0.90 and not is_w:
-            # Épisode actuellement en cours de visionnage (reprise)
-            return last_active_ep, "resume"
+        if 0.0 < prog_ratio < 0.90:
+            # Épisode partiellement regardé : reprise en cours de visionnage
+            return target_ep, "resume"
 
-        # Le dernier épisode actif est terminé / validé comme vu
-        # Trouver le premier épisode non vu suivant
-        for idx in range(last_active_idx + 1, len(self.all_episodes_flat)):
-            candidate_ep = self.all_episodes_flat[idx]
-            c_ratio, c_w = self._get_episode_progress(candidate_ep, progress_map)
-            if not c_w and c_ratio < 0.90:
-                return candidate_ep, "continue"
+        if first_unwatched_idx == 0:
+            # Aucun épisode précédent : c'est le tout début de la série
+            return target_ep, "start"
 
-        # Si tous les épisodes postérieurs sont vus, chercher s'il reste des épisodes non vus avant
-        for idx in range(len(self.all_episodes_flat)):
-            candidate_ep = self.all_episodes_flat[idx]
-            c_ratio, c_w = self._get_episode_progress(candidate_ep, progress_map)
-            if not c_w and c_ratio < 0.90:
-                return candidate_ep, "continue"
-
-        # Tous les épisodes de la série sont vus
-        return self._get_first_episode(), "restart"
+        # Des épisodes précédents sont terminés : enchaîner sur le premier non vu
+        return target_ep, "continue"
 
     def _update_resume_button_text(self):
         if self._video_widget:
@@ -2251,25 +2396,28 @@ class SeriesDetailsView(QWidget):
         self.stop_active_workers()
 
     def stop_active_workers(self):
-        """Arrête tous les threads d'arrière-plan actifs de la série."""
-        if hasattr(self, "_worker") and self._worker and self._worker.isRunning():
-            try:
-                self._worker.finished.disconnect()
-                self._worker.error.disconnect()
-            except Exception:
-                pass
-            self._worker.requestInterruption()
-            self._worker.wait(100)
-            self._worker = None
+        """Arrête tous les threads d'arrière-plan actifs de la série.
 
-        if hasattr(self, "_trailer_worker") and self._trailer_worker and self._trailer_worker.isRunning():
+        Ne teste jamais directement ``worker.isRunning()`` : l'objet C++ peut avoir
+        été détruit par ``deleteLater()`` alors que la référence Python subsiste, ce
+        qui lèverait une RuntimeError fatale (qFatal/abort) pour l'application.
+        """
+        worker = getattr(self, "_worker", None)
+        if worker is not None:
             try:
-                self._trailer_worker.finished_trailer.disconnect()
+                worker.finished.disconnect()
+                worker.error.disconnect()
             except Exception:
                 pass
-            self._trailer_worker.requestInterruption()
-            self._trailer_worker.wait(100)
-            self._trailer_worker = None
+            stop_tracked_worker(self, "_worker", 100)
+
+        trailer_worker = getattr(self, "_trailer_worker", None)
+        if trailer_worker is not None:
+            try:
+                trailer_worker.finished_trailer.disconnect()
+            except Exception:
+                pass
+            stop_tracked_worker(self, "_trailer_worker", 100)
 
     def _on_scroll_sync(self, _=None):
         if self._video_widget and self._video_widget.isVisible():
@@ -2413,23 +2561,21 @@ class SeriesDetailsView(QWidget):
 
     def stop_workers(self):
         """Arrête proprement tous les threads de travail d'arrière-plan."""
-        if hasattr(self, "_worker") and self._worker and self._worker.isRunning():
+        worker = getattr(self, "_worker", None)
+        if worker is not None:
             try:
-                self._worker.finished.disconnect()
-                self._worker.error.disconnect()
+                worker.finished.disconnect()
+                worker.error.disconnect()
             except Exception:
                 pass
-            self._worker.requestInterruption()
-            self._worker.wait(200)
-            self._worker = None
-        if hasattr(self, "_trailer_worker") and self._trailer_worker and self._trailer_worker.isRunning():
+            stop_tracked_worker(self, "_worker", 200)
+        trailer_worker = getattr(self, "_trailer_worker", None)
+        if trailer_worker is not None:
             try:
-                self._trailer_worker.finished_trailer.disconnect()
+                trailer_worker.finished_trailer.disconnect()
             except Exception:
                 pass
-            self._trailer_worker.requestInterruption()
-            self._trailer_worker.wait(200)
-            self._trailer_worker = None
+            stop_tracked_worker(self, "_trailer_worker", 200)
 
     def closeEvent(self, event):
         self.stop_workers()

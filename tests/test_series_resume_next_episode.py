@@ -116,6 +116,69 @@ class TestSeriesResumeNextEpisode(unittest.TestCase):
         self.view._update_resume_button_text()
         self.assertIn("Reprendre : S01E03", self.view.resume_btn.text())
 
+    def test_marking_episodes_unwatched_moves_resume_back(self):
+        """Marquer des épisodes comme « non lu » doit faire RECULER la cible du bouton Lecture.
+
+        Scénario : les 5 épisodes (S1 + S2) sont vus, puis l'utilisateur remet en « non lu »
+        tous les épisodes à partir de S01E02. La lecture doit repartir de S01E02
+        (l'épisode non lu le plus en arrière) et non du dernier épisode vu.
+        """
+        for ep_id in ("101", "102", "103", "201", "202"):
+            self.db.save_playback_progress(
+                channel_id=10,
+                stream_url=f"http://test.server:8080/series/user/pass/{ep_id}.mp4",
+                channel_name=f"Breaking Bad ep {ep_id}",
+                position=1000.0,
+                duration=1000.0
+            )
+        # L'utilisateur revient en arrière : S01E02 → S02E02 remis en « non lu »
+        for ep_id in ("102", "103", "201", "202"):
+            self.db.clear_playback_progress(
+                stream_url=f"http://test.server:8080/series/user/pass/{ep_id}.mp4",
+                episode_id=ep_id
+            )
+
+        self.view._update_resume_button_text()
+        self.assertIn("Reprendre : S01E02", self.view.resume_btn.text())
+
+        ep, action = self.view._get_resume_or_next_episode(self.db.get_all_playback_progress_map())
+        self.assertEqual(ep["id"], "102")
+        self.assertEqual(action, "continue")
+
+    def test_reset_episodes_while_last_still_partially_watched(self):
+        """Cas du bug : le dernier épisode reste partiellement entamé.
+
+        S01E01..S01E03 sont vus et S02E01 est partiellement lu (dernier épisode entamé).
+        Si l'utilisateur remet S01E02 et S01E03 en « non lu », la cible doit être S01E02
+        et non le dernier épisode partiel (S02E01).
+        """
+        for ep_id in ("101", "102", "103"):
+            self.db.save_playback_progress(
+                channel_id=10,
+                stream_url=f"http://test.server:8080/series/user/pass/{ep_id}.mp4",
+                channel_name=f"Breaking Bad ep {ep_id}",
+                position=1000.0,
+                duration=1000.0
+            )
+        # Dernier épisode entamé mais non terminé (reprise possible)
+        self.db.save_playback_progress(
+            channel_id=10,
+            stream_url="http://test.server:8080/series/user/pass/201.mp4",
+            channel_name="Breaking Bad ep 201",
+            position=400.0,
+            duration=1000.0
+        )
+        for ep_id in ("102", "103"):
+            self.db.clear_playback_progress(
+                stream_url=f"http://test.server:8080/series/user/pass/{ep_id}.mp4",
+                episode_id=ep_id
+            )
+
+        ep, action = self.view._get_resume_or_next_episode(self.db.get_all_playback_progress_map())
+        self.assertEqual(ep["id"], "102")
+        self.assertEqual(action, "continue")
+
+
     def test_season_completed_continues_to_next_season(self):
         """Quand toute la saison 1 est validée, le bouton propose la saison 2 épisode 1."""
         for ep_id in ("101", "102", "103"):

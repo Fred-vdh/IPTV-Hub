@@ -41,9 +41,11 @@ from ui.widgets.epg_grid_view import EPGGridView
 from ui.widgets.replay_view import ReplayView
 from ui.widgets.downloads_view import DownloadsView
 from core.download_manager import DownloadManager, DownloadItem
-from ui.icons import get_app_logo_icon, get_icon
+from ui.widgets.multiview_widget import MultiViewWidget
+from ui.icons import get_app_logo_icon, get_icon, prewarm_pixmap_cache
 from core.i18n import tr, I18nManager
 from ui.dialogs.themed_input_dialog import ThemedInputDialog
+from core.qt_worker_utils import is_worker_running, track_worker
 
 
 class MainWindow(QMainWindow):
@@ -101,6 +103,13 @@ class MainWindow(QMainWindow):
         # Fenêtre moderne sans bordure avec barre de titre sur mesure
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+
+        # Pré-chauffage du cache d'icônes ---------------------------------------
+        # QSvgRenderer.render() exécuté PENDANT un paintEvent corrompt la mémoire
+        # (crash aléatoire au premier affichage de la grille VOD) : on pré-rend donc
+        # toutes les icônes ici, avant la création des widgets et avant tout paint.
+        # (Idempotent : si main.py l'a déjà fait, cet appel est gratuit.)
+        prewarm_pixmap_cache()
 
         self.video_widget = MPVVideoWidget(parent=self)
 
@@ -273,7 +282,20 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        right_layout.addWidget(self.video_widget, stretch=1)
+        self.player_stack = QStackedWidget(self.right_container)
+        self.player_stack.addWidget(self.video_widget)
+
+        self.multiview_widget = MultiViewWidget(
+            self.db,
+            self.settings,
+            parent=self.right_container,
+            epg_provider=lambda tvg_id: self.db.get_current_program(tvg_id)
+        )
+        self.multiview_widget.exit_requested.connect(self._on_multiview_exit)
+        self.multiview_widget.fullscreen_requested.connect(self.toggle_fullscreen)
+        self.player_stack.addWidget(self.multiview_widget)
+
+        right_layout.addWidget(self.player_stack, stretch=1)
 
         self.epg_timeline_panel = EPGTimelinePanel(self.db, self)
         if not self.settings.epg_panel_visible:
@@ -430,6 +452,7 @@ class MainWindow(QMainWindow):
 
         # Contrôles Vidéo (Zapping, Seek 10s & Plein écran)
         self.video_widget.fullscreen_requested.connect(self.toggle_fullscreen)
+        self.video_widget.multiview_requested.connect(self.activate_multiview)
         self.video_widget.play_pause_requested.connect(self._on_play_pause_requested)
         self.video_widget.controls.next_channel_clicked.connect(self._play_next_channel)
         self.video_widget.controls.previous_channel_clicked.connect(self._play_previous_channel)
@@ -746,11 +769,12 @@ class MainWindow(QMainWindow):
         self.title_bar.progress_bar.setVisible(True)
         self.title_bar.refresh_btn.setEnabled(False)
 
-        self._refresh_worker = PlaylistImportWorker(self.db, playlist, self)
-        self._refresh_worker.progress.connect(self.title_bar.status_label.setText)
-        self._refresh_worker.finished_success.connect(self._on_refresh_success)
-        self._refresh_worker.error.connect(self._on_refresh_error)
-        self._refresh_worker.start()
+        refresh_worker = PlaylistImportWorker(self.db, playlist, self)
+        refresh_worker.progress.connect(self.title_bar.status_label.setText)
+        refresh_worker.finished_success.connect(self._on_refresh_success)
+        refresh_worker.error.connect(self._on_refresh_error)
+        track_worker(self, "_refresh_worker", refresh_worker)
+        refresh_worker.start()
 
     def _on_refresh_success(self, playlist_id: int):
         self.title_bar.progress_bar.setVisible(False)
@@ -781,8 +805,9 @@ class MainWindow(QMainWindow):
             self.recently_added_view.refresh_view()
             return
         elif current_content_idx == 4 and hasattr(self, "dashboard_view"):
+            # set_playlist_id() appelle déjà refresh_view() : un second appel
+            # reconstruirait intégralement le tableau de bord pour rien.
             self.dashboard_view.set_playlist_id(playlist_id)
-            self.dashboard_view.refresh_view()
             return
         elif current_content_idx == 5 and hasattr(self, "epg_grid_view"):
             self.epg_grid_view.set_playlist_id(playlist_id)
@@ -1037,10 +1062,11 @@ class MainWindow(QMainWindow):
                 url = self.current_channel.stream_url or ""
                 if url.startswith("file://") or os.path.exists(url):
                     is_local = True
-            if not is_local:
+            if not is_local and getattr(self.settings, "pause_downloads_during_playback", True):
                 DownloadManager.instance().pause_all_for_playback()
         elif state in ("stopped", "idle"):
-            DownloadManager.instance().resume_all_after_playback()
+            if getattr(self.settings, "pause_downloads_during_playback", True):
+                DownloadManager.instance().resume_all_after_playback()
 
     def _prepare_introdb_for_current_episode(self):
         """Recherche en tâche de fond les marqueurs IntroDB pour l'épisode de série lancé."""
@@ -1073,21 +1099,25 @@ class MainWindow(QMainWindow):
             self.current_channel.stream_url or ""
         )
 
-        if getattr(self, "_introdb_worker", None) and self._introdb_worker.isRunning():
+        # Arrêt sûr du worker précédent : son objet C++ peut déjà avoir été détruit
+        # par deleteLater() (cf. core.qt_worker_utils), un simple .isRunning() ferait
+        # alors planter toute l'application (qFatal/abort).
+        if is_worker_running(getattr(self, "_introdb_worker", None)):
             try:
                 self._introdb_worker.terminate()
             except Exception:
                 pass
 
-        self._introdb_worker = IntroDBWorker(
+        introdb_worker = IntroDBWorker(
             series_name=series_name,
             season=season,
             episode=episode,
             db=self.db,
             parent=self
         )
-        self._introdb_worker.segments_ready.connect(self._on_introdb_segments_ready)
-        self._introdb_worker.start()
+        introdb_worker.segments_ready.connect(self._on_introdb_segments_ready)
+        track_worker(self, "_introdb_worker", introdb_worker)
+        introdb_worker.start()
 
     def _on_introdb_segments_ready(self, segments):
         """Appelé lorsque les marqueurs IntroDB ont été récupérés (ou introuvables)."""
@@ -1371,7 +1401,113 @@ class MainWindow(QMainWindow):
             self.play_channel(next_ep, start_time=0.0)
             if hasattr(self, "series_details_view") and getattr(next_ep, "stream_id", None):
                 self.series_details_view.set_active_playing_episode(str(next_ep.stream_id))
-        return True
+    def activate_multiview(self):
+        """Bascule le lecteur Live TV en mode Multiview (mosaïque multi-écrans)."""
+        if hasattr(self, "player_stack") and self.player_stack.currentIndex() == 1:
+            return
+
+        cur = self.current_channel
+        if hasattr(self, "player_controller") and self.player_controller:
+            self.player_controller.stop()
+
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "controls"):
+            self.video_widget.controls.hide()
+
+        self.player_stack.setCurrentIndex(1)
+        if hasattr(self, "epg_timeline_panel"):
+            self.epg_timeline_panel.hide()
+
+        self.multiview_widget.start_multiview(cur)
+        self.multiview_widget.set_fullscreen_ui(getattr(self, "is_fullscreen", False))
+
+    def _leave_multiview(self) -> Optional[Channel]:
+        """Désactive intégralement le mode Multiview.
+
+        Tous les écrans secondaires sont arrêtés et refermés : il ne reste que
+        l'écran de base (le lecteur solo). Les cœurs libmpv des écrans secondaires
+        sont détruits en différé afin que l'interface ne se fige jamais, même si un
+        flux réseau met du temps à se libérer.
+
+        Retourne la chaîne qui avait le focus audio (``None`` si le Multiview
+        n'était pas actif).
+        """
+        if not hasattr(self, "multiview_widget"):
+            return None
+        mv = self.multiview_widget
+        was_active = bool(getattr(mv, "is_active", False)) or (
+            hasattr(self, "player_stack") and self.player_stack.currentIndex() == 1
+        )
+        if not was_active and not mv.has_running_slots():
+            # Sécurité : le lecteur solo doit toujours résider dans player_stack,
+            # même si aucun Multiview n'était actif (auto-guérison d'un état cassé).
+            self._reattach_video_widget()
+            return None
+
+        try:
+            active_channel = mv.active_channel()
+        except Exception:
+            active_channel = None
+
+        try:
+            mv.deactivate()
+        except Exception as e:
+            print(f"[MainWindow] erreur lors de la désactivation du Multiview : {e}")
+
+        # Remettre le lecteur solo dans player_stack (page 0) avant d'y revenir :
+        # sans cela, un lecteur détaché par une fiche laissait player_stack sur le
+        # Multiview, qui devenait impossible à fermer.
+        self._reattach_video_widget()
+        if hasattr(self, "player_stack"):
+            self.player_stack.setCurrentIndex(0)
+        return active_channel
+
+    def _reattach_video_widget(self):
+        """Replace le lecteur vidéo solo dans son conteneur d'origine (player_stack, page 0).
+
+        Le lecteur vit normalement dans ``player_stack`` (index 0), à côté du
+        Multiview (index 1). Les fiches détaillées (série/film) et les
+        bandes-annonces le détachent temporairement pour l'afficher au-dessus de
+        leur contenu : il doit donc y être remis à la fin, et NON inséré
+        directement dans ``right_container.layout()``.
+
+        Insérer le lecteur directement dans le conteneur de droite scindait
+        l'écran en deux (lecteur en haut à pleine largeur, puis ``player_stack``
+        avec le Multiview en bas) et rendait le Multiview impossible à fermer :
+        ``player_stack`` ne contenant plus le lecteur, ``setCurrentIndex(0)`` ne
+        pouvait plus le réafficher.
+        """
+        if not (hasattr(self, "player_stack") and hasattr(self, "video_widget")):
+            return
+        # Ne jamais déplacer le lecteur pendant qu'il est volontairement attaché
+        # à une fiche détaillée ou une bande-annonce.
+        if (
+            getattr(self, "_is_playing_series_in_details", False)
+            or getattr(self, "_is_playing_movie_in_details", False)
+            or getattr(self, "_is_playing_trailer", False)
+        ):
+            return
+        try:
+            if self.player_stack.indexOf(self.video_widget) == -1:
+                self.player_stack.insertWidget(0, self.video_widget)
+            self.player_stack.setCurrentWidget(self.video_widget)
+        except Exception as e:
+            print(f"[MainWindow] impossible de replacer le lecteur vidéo : {e}")
+            return
+        self.video_widget.setMinimumHeight(0)
+        self.video_widget.setMaximumHeight(16777215)
+        self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def _on_multiview_exit(self, active_channel: Optional[Channel]):
+        """Sort du mode Multiview et reprend la lecture en solo de la chaîne active."""
+        if hasattr(self, "epg_timeline_panel") and self.settings.epg_panel_visible:
+            self.epg_timeline_panel.show()
+
+        # Tous les écrans secondaires sont désactivés : seul l'écran de base reste.
+        self._leave_multiview()
+
+        target_ch = active_channel or self.current_channel
+        if target_ch:
+            self.play_channel(target_ch)
 
     def _on_play_pause_requested(self):
         """Gestion centralisée de la commande Play/Pause (Bouton OSD ou barre d'espace)."""
@@ -1531,6 +1667,10 @@ class MainWindow(QMainWindow):
         self._current_playback_pos = 0.0
         self._current_playback_dur = 0.0
 
+        # Quitter la TV en direct (ou toute autre section) doit TOUJOURS désactiver
+        # tous les écrans du Multiview : il ne doit rester que l'écran de base.
+        resumed_channel = self._leave_multiview()
+
         # Rebascule sur le lecteur si on était dans les paramètres ou favoris
         self.current_section = section_id
         self._update_search_placeholder(section_id, clear_text=True)
@@ -1551,8 +1691,9 @@ class MainWindow(QMainWindow):
             self.recently_added_view.refresh_view()
         elif section_id == "dashboard":
             self.content_stack.setCurrentIndex(4)  # Vue Tableau de Bord Dédiée
+            # DashboardView.set_playlist_id() appelle déjà refresh_view() :
+            # ne pas rafraîchir deux fois (double coût + double reconstruction).
             self.dashboard_view.set_playlist_id(pl_id)
-            self.dashboard_view.refresh_view()
         elif section_id == "epg":
             self.content_stack.setCurrentIndex(5)  # Vue Guide des Programmes EPG
             self.epg_grid_view.set_playlist_id(pl_id)
@@ -1597,6 +1738,11 @@ class MainWindow(QMainWindow):
             self._apply_layout_geometry()
             self._apply_current_section(pl_id)
 
+        # Retour sur la TV en direct : reprendre en solo la chaîne du Multiview qui
+        # avait le focus audio (même comportement que le bouton « Quitter Multiview »).
+        if resumed_channel and section_id == "live" and not self.current_channel:
+            self.play_channel(resumed_channel)
+
     def _apply_current_section(self, playlist_id: Optional[int]):
         self._update_search_placeholder(self.current_section)
         if self.current_section == "favorites":
@@ -1613,8 +1759,8 @@ class MainWindow(QMainWindow):
             self.recently_added_view.refresh_view()
         elif self.current_section == "dashboard":
             self.content_stack.setCurrentIndex(4)
+            # set_playlist_id() appelle déjà refresh_view() : pas de doublon.
             self.dashboard_view.set_playlist_id(playlist_id)
-            self.dashboard_view.refresh_view()
         elif self.current_section == "epg":
             self.content_stack.setCurrentIndex(5)
             self.epg_grid_view.set_playlist_id(playlist_id)
@@ -1991,8 +2137,8 @@ class MainWindow(QMainWindow):
                 self.epg_timeline_panel.hide()
             self._apply_layout_geometry()
 
-            # Détacher le lecteur vidéo du conteneur de droite et l'attacher à la fiche série
-            self.right_container.layout().removeWidget(self.video_widget)
+            # Détacher le lecteur vidéo de son conteneur (player_stack) et l'attacher à la fiche série
+            self.player_stack.removeWidget(self.video_widget)
             self.series_details_view.attach_video_widget(self.video_widget)
 
         self._play_series_episode_in_details(channel, start_pos=start_pos)
@@ -2049,10 +2195,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "video_widget"):
             self.video_widget.controls.hide()
             self.series_details_view.detach_video_widget(self.video_widget)
-            self.right_container.layout().insertWidget(0, self.video_widget, stretch=1)
-            self.video_widget.setMinimumHeight(0)
-            self.video_widget.setMaximumHeight(16777215)
-            self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            self._reattach_video_widget()
         self._apply_layout_geometry()
         self.series_details_view.refresh_progress()
 
@@ -2191,8 +2334,8 @@ class MainWindow(QMainWindow):
             self.epg_timeline_panel.hide()
         self._apply_layout_geometry()
 
-        # Détacher le lecteur vidéo du conteneur de droite et l'attacher à la fiche film
-        self.right_container.layout().removeWidget(self.video_widget)
+        # Détacher le lecteur vidéo de son conteneur (player_stack) et l'attacher à la fiche film
+        self.player_stack.removeWidget(self.video_widget)
         self.movie_details_view.attach_video_widget(self.video_widget)
 
         # Mettre à jour l'OSD complet
@@ -2238,10 +2381,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "video_widget"):
             self.video_widget.controls.hide()
             self.movie_details_view.detach_video_widget(self.video_widget)
-            self.right_container.layout().insertWidget(0, self.video_widget, stretch=1)
-            self.video_widget.setMinimumHeight(0)
-            self.video_widget.setMaximumHeight(16777215)
-            self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            self._reattach_video_widget()
         self._apply_layout_geometry()
         self.movie_details_view.refresh_progress()
 
@@ -2278,7 +2418,7 @@ class MainWindow(QMainWindow):
             self.epg_timeline_panel.hide()
         self._apply_layout_geometry()
 
-        self.right_container.layout().removeWidget(self.video_widget)
+        self.player_stack.removeWidget(self.video_widget)
         target_view.attach_video_widget(self.video_widget)
 
         self.video_widget.controls.update_channel_info(trailer_channel)
@@ -2307,10 +2447,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "video_widget"):
             self.video_widget.controls.hide()
             target_view.detach_video_widget(self.video_widget)
-            self.right_container.layout().insertWidget(0, self.video_widget, stretch=1)
-            self.video_widget.setMinimumHeight(0)
-            self.video_widget.setMaximumHeight(16777215)
-            self.video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            self._reattach_video_widget()
 
         self._apply_layout_geometry()
         if hasattr(target_view, "refresh_progress"):
@@ -2336,6 +2473,9 @@ class MainWindow(QMainWindow):
         self._save_current_playback_progress()
         self.player_controller.stop()
         self.video_widget.controls.hide()
+
+        # Quitter la TV en direct (bouton retour) désactive aussi le Multiview.
+        self._leave_multiview()
 
         if self.current_section == "dashboard":
             self.content_stack.setCurrentIndex(4)
@@ -2585,6 +2725,9 @@ class MainWindow(QMainWindow):
         self.current_channel = None
         self._current_playback_pos = 0.0
         self._current_playback_dur = 0.0
+        # Les écrans secondaires du Multiview ne doivent pas continuer à diffuser
+        # en arrière-plan pendant l'affichage des paramètres.
+        self._leave_multiview()
         if hasattr(self, "settings_view"):
             self.settings_view.set_playlist_id(self.get_selected_playlist_id())
             self.settings_view._load_values()
@@ -2854,6 +2997,8 @@ class MainWindow(QMainWindow):
             self.video_widget.stack.setStyleSheet("background-color: #000000; border: none; margin: 0; padding: 0;")
             self.video_widget.video_surface.setStyleSheet("background-color: #000000; border: none; margin: 0; padding: 0;")
             self.video_widget.set_fullscreen(True)
+            if hasattr(self, "multiview_widget"):
+                self.multiview_widget.set_fullscreen_ui(True)
             if getattr(self, "_is_playing_movie_in_details", False) or (getattr(self, "_trailer_origin", "") == "movie" and getattr(self, "_is_playing_trailer", False)):
                 self.movie_details_view.set_fullscreen(True)
             if getattr(self, "_is_playing_series_in_details", False) or (getattr(self, "_trailer_origin", "") == "series" and getattr(self, "_is_playing_trailer", False)):
@@ -2926,6 +3071,8 @@ class MainWindow(QMainWindow):
             self.video_widget.controls.hide()
             self.video_widget.controls.hide_bars()
             self.video_widget.set_fullscreen(False)
+            if hasattr(self, "multiview_widget"):
+                self.multiview_widget.set_fullscreen_ui(False)
             self.video_widget.show_mouse_cursor()
         self.unsetCursor()
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -3487,6 +3634,29 @@ class MainWindow(QMainWindow):
             collapsed=self.settings.categories_collapsed
         )
 
+    def _release_video_render_contexts(self):
+        """Libère le contexte de rendu OpenGL de la surface vidéo principale.
+
+        libmpv (render.h) impose de libérer le contexte de rendu AVANT la
+        destruction du coeur mpv :
+        "You must free the context with mpv_render_context_free() before the
+         mpv core is destroyed. If this doesn't happen, undefined behavior
+         will result."
+
+        On l'appelle donc depuis closeEvent() avant player_controller.cleanup()
+        (-> mpv.terminate()) et avant hide(), car la libération a besoin d'un
+        contexte OpenGL encore valide (makeCurrent()). Sans cela : access
+        violation aléatoire à la fermeture de l'application.
+        """
+        video_widget = getattr(self, "video_widget", None)
+        surface = getattr(video_widget, "video_surface", None)
+        if surface is None:
+            return
+        try:
+            surface.cleanup_render_context()
+        except Exception as e:
+            print(f"[MainWindow] erreur de libération du contexte de rendu vidéo : {e}")
+
     def closeEvent(self, event):
         # 1. Mémorisation précise de l'état (Plein écran vs Maximisé vs Fenêtré/Réduit) et de la géométrie AVANT TOUT MASQUAGE
         is_fs = getattr(self, "is_fullscreen", False) or self.isFullScreen()
@@ -3621,9 +3791,17 @@ class MainWindow(QMainWindow):
         if hasattr(self, "series_details_view") and hasattr(self.series_details_view, "stop_workers"):
             self.series_details_view.stop_workers()
 
+        # 7.b Libération du contexte de rendu OpenGL AVANT la destruction du coeur
+        # mpv (player_controller.cleanup ci-dessous) et pendant que le contexte
+        # OpenGL du widget est encore valide, donc avant hide() (voir
+        # _release_video_render_contexts pour le détail de la contrainte libmpv).
+        self._release_video_render_contexts()
+
         self.hide()
         QApplication.processEvents()
 
+        if hasattr(self, "multiview_widget"):
+            self.multiview_widget.stop_all()
         self.player_controller.cleanup()
         event.accept()
 
