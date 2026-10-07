@@ -3,12 +3,17 @@ Fournisseur d'icônes Google Material Symbols (Outlined) pour l'application IPTV
 Couleur par défaut: #e3e3e3 (comme demandé).
 """
 
+import logging
+import os
 import sys
+import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from PyQt6.QtGui import QIcon, QPixmap, QPainter
 from PyQt6.QtCore import Qt, QByteArray
 from PyQt6.QtSvg import QSvgRenderer
+
+logger = logging.getLogger(__name__)
 
 # Couleur standard demandée par l'utilisateur
 DEFAULT_ICON_COLOR = "#e3e3e3"
@@ -135,7 +140,35 @@ MATERIAL_SYMBOLS_PATHS: Dict[str, str] = {
     "smartphone": "M280-40q-33 0-56.5-23.5T200-120v-720q0-33 23.5-56.5T280-920h400q33 0 56.5 23.5T760-840v720q0 33-23.5 56.5T680-40H280Zm0-120h400v-640H280v640Zm200-40q17 0 28.5-11.5T520-240q0-17-11.5-28.5T480-280q-17 0-28.5 11.5T440-240q0 17 11.5 28.5T480-200Zm-200 40v-640 640Z"
 }
 
+# ---------------------------------------------------------------------------
+# Cache de rendu des icônes
+# ---------------------------------------------------------------------------
+# ATTENTION : QSvgRenderer.render() (via QPainter) exécuté PENDANT un paintEvent
+# corrompt la mémoire (access violation aléatoire, ex. au premier affichage de la
+# grille VOD). Les icônes sont donc rendues UNE seule fois à la taille de référence,
+# hors de tout paintEvent, puis les autres tailles sont dérivées par simple mise à
+# l'échelle matricielle (QPixmap.scaled), opération sûre dans tous les contextes.
+MASTER_ICON_SIZE = 72  # la plus grande taille demandée par l'UI
+
+# Couleurs réellement passées aux fonctions d'icônes dans l'application.
+PRECACHE_COLORS: Tuple[str, ...] = (
+    "#0a1628", "#0f172a", "#10b981", "#334155", "#34d399", "#38bdf8",
+    "#3b82f6", "#475569", "#4ade80", "#526077", "#60a5fa", "#6366f1",
+    "#64748b", "#818cf8", "#94a3b8", "#cbd5e1", "#e2e8f0", "#e3e3e3",
+    "#ef4444", "#f43f5e", "#f87171", "#fbbf24", "#ffffff",
+)
+
+# Icônes sans fichier SVG ni symbole embarqué (rendu générique de secours).
+FALLBACK_ICON_NAMES: Tuple[str, ...] = (
+    "delete_outline", "file_download", "language", "person", "videocam_off",
+)
+
 _svg_cache: Dict[str, QByteArray] = {}
+_master_pixmaps: Dict[Tuple[str, str], QPixmap] = {}
+_pixmap_cache: Dict[Tuple[str, str, int], QPixmap] = {}
+_icon_cache: Dict[Tuple[str, str, Optional[str]], QIcon] = {}
+_render_count = 0  # nombre de rendus SVG réellement effectués (diagnostic)
+_prewarm_state: Optional[Tuple[int, float]] = None  # (motifs, ms) du pré-chauffage
 
 
 def get_svg_data(icon_name: str, color: str = DEFAULT_ICON_COLOR) -> QByteArray:
@@ -175,12 +208,15 @@ def get_svg_data(icon_name: str, color: str = DEFAULT_ICON_COLOR) -> QByteArray:
     return data
 
 
-def get_pixmap(icon_name: str, color: str = DEFAULT_ICON_COLOR, size: int = 24) -> QPixmap:
-    """Génère un QPixmap haute résolution pour l'icône demandée."""
-    svg_data = get_svg_data(icon_name, color)
-    renderer = QSvgRenderer(svg_data)
+def _render_master_pixmap(icon_name: str, color: str) -> QPixmap:
+    """Rend l'icône à la taille de référence : SEUL endroit qui exécute le SVG.
 
-    pix = QPixmap(size, size)
+    À n'appeler que hors paintEvent (voir prewarm_pixmap_cache()).
+    """
+    global _render_count
+    renderer = QSvgRenderer(get_svg_data(icon_name, color))
+
+    pix = QPixmap(MASTER_ICON_SIZE, MASTER_ICON_SIZE)
     pix.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pix)
@@ -189,20 +225,130 @@ def get_pixmap(icon_name: str, color: str = DEFAULT_ICON_COLOR, size: int = 24) 
     renderer.render(painter)
     painter.end()
 
+    _render_count += 1
+    return pix
+
+
+def get_master_pixmap(icon_name: str, color: str = DEFAULT_ICON_COLOR) -> QPixmap:
+    """Retourne le pixmap de référence (MASTER_ICON_SIZE) mémoïsé pour (icône, couleur)."""
+    key = (icon_name, color)
+    pix = _master_pixmaps.get(key)
+    if pix is None:
+        pix = _render_master_pixmap(icon_name, color)
+        _master_pixmaps[key] = pix
+    return pix
+
+
+def get_pixmap(icon_name: str, color: str = DEFAULT_ICON_COLOR, size: int = 24) -> QPixmap:
+    """Génère un QPixmap haute résolution pour l'icône demandée.
+
+    Appelable sans risque depuis un paintEvent : le rendu SVG n'a lieu qu'une fois
+    (au pré-chauffage ou au premier appel) et les autres tailles sont obtenues par
+    mise à l'échelle matricielle du pixmap de référence.
+    """
+    key = (icon_name, color, size)
+    pix = _pixmap_cache.get(key)
+    if pix is not None:
+        return pix
+
+    master = get_master_pixmap(icon_name, color)
+    if size == MASTER_ICON_SIZE:
+        pix = QPixmap(master)  # copie : le cache de référence n'est jamais exposé
+    else:
+        # size > MASTER_ICON_SIZE agrandirait l'image (cas non utilisé par l'UI).
+        pix = master.scaled(
+            size,
+            size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    _pixmap_cache[key] = pix
     return pix
 
 
 def get_icon(icon_name: str, color: str = DEFAULT_ICON_COLOR, active_color: Optional[str] = None) -> QIcon:
-    """Génère un QIcon complet (avec état normal et actif)."""
+    """Génère un QIcon complet (avec état normal et actif), mémoïsé."""
+    key = (icon_name, color, active_color)
+    icon = _icon_cache.get(key)
+    if icon is not None:
+        return icon
+
     icon = QIcon()
+    act_col = active_color or color
     for s in [16, 20, 24, 32, 48]:
         pix_normal = get_pixmap(icon_name, color=color, size=s)
         icon.addPixmap(pix_normal, QIcon.Mode.Normal, QIcon.State.Off)
 
-        act_col = active_color or color
         pix_active = get_pixmap(icon_name, color=act_col, size=s)
         icon.addPixmap(pix_active, QIcon.Mode.Normal, QIcon.State.On)
         icon.addPixmap(pix_active, QIcon.Mode.Active, QIcon.State.Off)
         icon.addPixmap(pix_active, QIcon.Mode.Selected, QIcon.State.Off)
 
+    _icon_cache[key] = icon
     return icon
+
+
+def iter_icon_names() -> Tuple[str, ...]:
+    """Retourne tous les noms d'icônes connus (fichiers SVG + symboles + secours)."""
+    names = set(MATERIAL_SYMBOLS_PATHS)
+    try:
+        names |= {p.stem for p in get_assets_icons_dir().glob("*.svg")}
+    except Exception:
+        pass
+    names |= set(FALLBACK_ICON_NAMES)
+    return tuple(sorted(names))
+
+
+def prewarm_pixmap_cache(colors: Optional[Tuple[str, ...]] = None, force: bool = False) -> Tuple[int, float]:
+    """Pré-rend hors paintEvent tous les pixmaps de référence (icône × couleur).
+
+    À appeler une fois, après la création du QApplication et AVANT tout widget :
+    ainsi plus aucun rendu SVG n'a lieu pendant les paintEvent.
+    Idempotent (le second appel ne coûte rien) ; à relancer avec force=True pour
+    reconstruire le cache (ou colors=... pour une palette personnalisée).
+    Désactivable via la variable d'environnement IPTV_NO_ICON_PREWARM=1.
+    Ne lève jamais d'exception (un échec ne doit pas empêcher le démarrage).
+    Retourne le couple (nombre de motifs pré-rendus, durée en millisecondes).
+    """
+    global _prewarm_state
+    if _prewarm_state is not None and not force:
+        return _prewarm_state
+    if os.environ.get("IPTV_NO_ICON_PREWARM") == "1":
+        logger.info("Pré-chauffage des icônes désactivé (IPTV_NO_ICON_PREWARM=1)")
+        _prewarm_state = (0, 0.0)
+        return _prewarm_state
+
+    t0 = time.perf_counter()
+    palette = tuple(colors) if colors else PRECACHE_COLORS
+    try:
+        names = iter_icon_names()
+    except Exception:
+        names = tuple(FALLBACK_ICON_NAMES)
+
+    count = 0
+    try:
+        for name in names:
+            for color in palette:
+                get_master_pixmap(name, color)
+                count += 1
+    except Exception as exc:
+        logger.warning("Pré-chauffage des icônes interrompu après %d motifs : %s", count, exc)
+
+    duration_ms = (time.perf_counter() - t0) * 1000.0
+    logger.info(
+        "Pré-chauffage des icônes : %d motifs (%d icônes × %d couleurs) en %.0f ms",
+        count, len(names), len(palette), duration_ms,
+    )
+    _prewarm_state = (count, duration_ms)
+    return _prewarm_state
+
+
+def pixmap_cache_stats() -> Dict[str, int]:
+    """Statistiques du cache d'icônes (diagnostic)."""
+    return {
+        "svg_data": len(_svg_cache),
+        "masters": len(_master_pixmaps),
+        "pixmaps": len(_pixmap_cache),
+        "icons": len(_icon_cache),
+        "svg_renders": _render_count,
+    }
