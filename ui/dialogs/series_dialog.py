@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QFrame, QMessageBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import QPixmap
 
 from core.models import Channel, Playlist
 from core.database import Database

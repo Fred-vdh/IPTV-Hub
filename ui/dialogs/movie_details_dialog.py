@@ -441,6 +441,7 @@ class MovieDetailsDialog(QDialog):
     def _cleanup(self):
         try:
             loader = ImageLoader.instance()
+            loader.cancel_target(self)
             loader.image_loaded.disconnect(self._on_poster_loaded)
         except Exception:
             pass
@@ -530,7 +531,3 @@ class MovieDetailsDialog(QDialog):
 
         self.details_label.setText("<br>".join(details_txt))
         self.synopsis_label.setText(plot)
-
-    def closeEvent(self, event):
-        ImageLoader.instance().cancel_target(self)
-        super().closeEvent(event)
