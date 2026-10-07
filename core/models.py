@@ -239,6 +239,7 @@ class AppSettings:
     window_fullscreen: bool = False
     download_dir: str = ""
     download_speed_limit: int = 0
+    pause_downloads_during_playback: bool = True
     sync_enabled: bool = False
     sync_folder: str = ""
     sync_last_timestamp: str = ""

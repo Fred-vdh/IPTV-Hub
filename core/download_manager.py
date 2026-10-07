@@ -544,6 +544,7 @@ class DownloadManager(QObject):
         worker.progress.connect(on_prog)
         worker.download_finished.connect(on_finished)
         worker.download_error.connect(on_err)
+        worker.finished.connect(worker.deleteLater)
         worker.start()
 
         item.status = DownloadStatus.DOWNLOADING

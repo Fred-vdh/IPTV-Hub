@@ -174,6 +174,13 @@ class Database:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_stream ON channels(stream_url);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_stream_id ON channels(playlist_id, stream_type, stream_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_series_name ON channels(stream_type, name COLLATE NOCASE);")
+            # Index dédié à la correspondance (stream_type, stream_id) utilisée par
+            # la réconciliation order_index ci-dessous. Sans lui, le plan retenait
+            # idx_channel_series_name (filtre sur stream_type seul) : chaque élément
+            # de liste scannait ~37 000 lignes, soit ~1,2 s de travail pour zéro
+            # modification réelle. Cet index est purement additif et ne change
+            # aucune valeur produite (vérifié avec et sans, résultats identiques).
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_channel_type_streamid ON channels(stream_type, stream_id);")
             # Table persistante des favoris (garantit la conservation éternelle même lors du rechargement des playlists)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS persistent_favorites (
@@ -2217,6 +2224,8 @@ class Database:
                     settings.download_speed_limit = int(data["download_speed_limit"])
                 except (ValueError, TypeError):
                     settings.download_speed_limit = 0
+            if "pause_downloads_during_playback" in data:
+                settings.pause_downloads_during_playback = data["pause_downloads_during_playback"].lower() == "true"
             if "sync_enabled" in data:
                 settings.sync_enabled = data["sync_enabled"].lower() == "true"
             if "sync_folder" in data:
@@ -2276,6 +2285,7 @@ class Database:
                 "window_fullscreen": str(settings.window_fullscreen),
                 "download_dir": settings.download_dir,
                 "download_speed_limit": str(settings.download_speed_limit),
+                "pause_downloads_during_playback": str(settings.pause_downloads_during_playback),
                 "sync_enabled": str(settings.sync_enabled),
                 "sync_folder": settings.sync_folder,
                 "sync_last_timestamp": settings.sync_last_timestamp,

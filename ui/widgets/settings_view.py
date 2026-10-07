@@ -717,6 +717,15 @@ class SettingsView(QWidget):
         self.lbl_dl_speed_hint.setStyleSheet("font-size: 11px; color: #94a3b8; margin-top: 2px; margin-bottom: 8px;")
         c_layout.addWidget(self.lbl_dl_speed_hint)
 
+        self.pause_dl_playback_cb = QCheckBox(" " + tr("Mettre en pause les téléchargements pendant la lecture vidéo"))
+        self.pause_dl_playback_cb.setChecked(getattr(self.settings, "pause_downloads_during_playback", True))
+        self.pause_dl_playback_cb.setStyleSheet("font-size: 13px; color: #f1f5f9; margin-top: 6px;")
+        c_layout.addWidget(self.pause_dl_playback_cb)
+
+        self.lbl_pause_dl_hint = QLabel(tr("Suspend temporairement les téléchargements dès qu'une vidéo démarre pour préserver la fluidité."))
+        self.lbl_pause_dl_hint.setStyleSheet("font-size: 11px; color: #94a3b8; margin-left: 22px; margin-bottom: 8px;")
+        c_layout.addWidget(self.lbl_pause_dl_hint)
+
         sep_speed = QFrame()
         sep_speed.setFrameShape(QFrame.Shape.HLine)
         sep_speed.setStyleSheet("background-color: #20293d; margin: 10px 0px;")
@@ -1038,6 +1047,8 @@ class SettingsView(QWidget):
                     speed_idx = i
                     break
             self.download_speed_combo.setCurrentIndex(speed_idx)
+        if hasattr(self, "pause_dl_playback_cb"):
+            self.pause_dl_playback_cb.setChecked(getattr(self.settings, "pause_downloads_during_playback", True))
         self.auto_play_next_cb.setChecked(getattr(self.settings, "auto_play_next_episode", True))
         if hasattr(self, "introdb_intro_cb"):
             self.introdb_intro_cb.setChecked(getattr(self.settings, "introdb_intro_skip", True))
@@ -1123,6 +1134,8 @@ class SettingsView(QWidget):
         self.settings.download_dir = self.download_dir_edit.text().strip()
         if hasattr(self, "download_speed_combo"):
             self.settings.download_speed_limit = self.download_speed_combo.currentData() or 0
+        if hasattr(self, "pause_dl_playback_cb"):
+            self.settings.pause_downloads_during_playback = self.pause_dl_playback_cb.isChecked()
         self.settings.preferred_audio_lang = self.audio_lang_combo.currentData() or ""
         self.settings.auto_play_next_episode = self.auto_play_next_cb.isChecked()
         if hasattr(self, "introdb_intro_cb"):
@@ -1340,6 +1353,10 @@ class SettingsView(QWidget):
             self.lbl_dl_speed.setText(tr("Limitation de la vitesse de téléchargement :"))
         if hasattr(self, "lbl_dl_speed_hint"):
             self.lbl_dl_speed_hint.setText(tr("Permet de brider le débit pour ne pas saturer votre connexion ou le serveur IPTV."))
+        if hasattr(self, "pause_dl_playback_cb"):
+            self.pause_dl_playback_cb.setText(" " + tr("Mettre en pause les téléchargements pendant la lecture vidéo"))
+        if hasattr(self, "lbl_pause_dl_hint"):
+            self.lbl_pause_dl_hint.setText(tr("Suspend temporairement les téléchargements dès qu'une vidéo démarre pour préserver la fluidité."))
         if hasattr(self, "download_speed_combo") and self.download_speed_combo.count() > 0:
             self.download_speed_combo.setItemText(0, tr("Illimitée (Maximale)"))
         if hasattr(self, "lbl_db_path"):
