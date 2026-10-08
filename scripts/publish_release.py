@@ -72,6 +72,8 @@ Bienvenue dans la version **{__version__}** d'**IPTV Hub**, le lecteur multiméd
 
 4. **✨ Épuration de l'interface & Ergonomie** :
    - Épuration du Tableau de bord et de l'onglet Récemment regardé : suppression des chaînes TV en direct pour éliminer la pollution liée au zapping.
+   - Mise en pause instantanée d'un simple clic dès le premier essai (y compris après basculement plein écran ou retour depuis une autre fenêtre).
+   - Optimisation et fluidification des transitions plein écran (suppression des re-calculs CSS et suspension ciblée des repositionnements).
    - Navigation fluide et retour contextualisé depuis les fiches de détails.
 
 ---
