@@ -2084,19 +2084,25 @@ class SeriesDetailsView(QWidget):
         self._update_video_geometry()
         if self._video_widget and self._video_widget.isVisible():
             self._video_widget._sync_geometry()
-        self._reposition_episode_cards()
+        if not getattr(self, "_is_fullscreen", False) and hasattr(self, "details_container") and self.details_container.isVisible():
+            self._reposition_episode_cards()
 
     def eventFilter(self, watched, event: QEvent) -> bool:
         if hasattr(self, "scroll_area") and watched == self.scroll_area.viewport() and event.type() == QEvent.Type.Resize:
             self._update_video_geometry()
             if self._video_widget and self._video_widget.isVisible():
                 self._video_widget._sync_geometry()
-            self._reposition_episode_cards()
+            if not getattr(self, "_is_fullscreen", False) and hasattr(self, "details_container") and self.details_container.isVisible():
+                self._reposition_episode_cards()
         return super().eventFilter(watched, event)
 
     def _reposition_episode_cards(self):
         """Réorganise instantanément les cartes d'épisodes pour s'adapter à la largeur sans déborder à droite."""
         if not hasattr(self, "episodes_grid") or not hasattr(self, "scroll_area"):
+            return
+        if getattr(self, "_is_fullscreen", False):
+            return
+        if not self.isVisible() or (hasattr(self, "details_container") and not self.details_container.isVisible()):
             return
 
         cards = []
@@ -2479,6 +2485,7 @@ class SeriesDetailsView(QWidget):
             self.content_layout.setSpacing(20)
             self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             self._update_video_geometry()
+            self._reposition_episode_cards()
 
     def set_active_playing_episode(self, episode_id: str):
         """Met en surbrillance l'épisode actuellement en cours de lecture et sélectionne automatiquement son onglet de saison."""

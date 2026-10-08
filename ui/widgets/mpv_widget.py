@@ -294,12 +294,11 @@ class MPVVideoWidget(QWidget):
                 return True
         return False
 
-    def suppress_clicks(self, duration: float = 1.2):
-        """Verrouille immédiatement tout clic ou rebond pendant la durée spécifiée."""
+    def suppress_clicks(self, duration: float = 0.35):
+        """Verrouille temporairement le rebond consécutif à un double-clic."""
         now = time.monotonic()
         self._suppress_click_until = max(getattr(self, "_suppress_click_until", 0.0), now + duration)
         self._last_dblclick_time = max(getattr(self, "_last_dblclick_time", 0.0), now)
-        self._ignore_next_release = True
         self._mouse_pressed_on_video = False
         if hasattr(self, "_click_timer"):
             self._click_timer.stop()
@@ -309,7 +308,7 @@ class MPVVideoWidget(QWidget):
         now = time.monotonic()
         if now < getattr(self, "_suppress_click_until", 0.0):
             return
-        if now - getattr(self, "_last_dblclick_time", 0.0) < 1.2:
+        if now - getattr(self, "_last_dblclick_time", 0.0) < 0.35:
             return
         if self.controls.has_active_media:
             self._trigger_play_pause()
@@ -428,21 +427,18 @@ class MPVVideoWidget(QWidget):
                     # cela signifie qu'un second clic ou une action rapide commence !
                     self._click_timer.stop()
                     now = time.monotonic()
-                    if now < getattr(self, "_suppress_click_until", 0.0) or (now - getattr(self, "_last_dblclick_time", 0.0) < 1.0):
+                    if now < getattr(self, "_suppress_click_until", 0.0) or (now - getattr(self, "_last_dblclick_time", 0.0) < 0.35):
                         self._mouse_pressed_on_video = False
                     else:
                         self._mouse_pressed_on_video = True
                     self.setFocus()
-                    win = self.window()
-                    if win and not win.isActiveWindow():
-                        win.activateWindow()
 
         elif event_type == QEvent.Type.MouseButtonDblClick:
             if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.LeftButton:
                 global_pos = event.globalPosition().toPoint()
                 self._last_mouse_pos = global_pos
                 if not self._is_click_on_controls_bar(global_pos) and self.controls.has_active_media:
-                    self.suppress_clicks(1.2)
+                    self.suppress_clicks(0.35)
                     self.fullscreen_requested.emit()
                     return True
 
@@ -452,21 +448,15 @@ class MPVVideoWidget(QWidget):
                 self._last_mouse_pos = global_pos
                 if not self._is_click_on_controls_bar(global_pos) and self.controls.has_active_media:
                     now = time.monotonic()
-                    # Si le release suivant un double-clic ou si un verrou est actif, ignorer le release
-                    if getattr(self, "_ignore_next_release", False):
-                        self._ignore_next_release = False
+                    # Si un verrou consécutif à un double-clic est actif, ignorer le release
+                    if now < getattr(self, "_suppress_click_until", 0.0) or (now - getattr(self, "_last_dblclick_time", 0.0) < 0.35):
                         self._mouse_pressed_on_video = False
-                        return True
-                    if now < getattr(self, "_suppress_click_until", 0.0) or (now - getattr(self, "_last_dblclick_time", 0.0) < 1.0):
-                        self._mouse_pressed_on_video = False
-                        return True
-                    if not getattr(self, "_mouse_pressed_on_video", False):
                         return True
                     self._mouse_pressed_on_video = False
                     self._click_timer.stop()
                     from PyQt6.QtWidgets import QApplication
                     dbl_int = QApplication.doubleClickInterval()
-                    delay_ms = max(400, min(550, dbl_int + 20))
+                    delay_ms = max(240, min(280, dbl_int))
                     self._click_timer.start(delay_ms)
                     return True
 

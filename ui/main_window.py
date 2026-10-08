@@ -45,6 +45,7 @@ from ui.widgets.multiview_widget import MultiViewWidget
 from ui.icons import get_app_logo_icon, get_icon, prewarm_pixmap_cache
 from core.i18n import tr, I18nManager
 from ui.dialogs.themed_input_dialog import ThemedInputDialog
+from core.image_loader import ImageLoader
 from core.qt_worker_utils import is_worker_running, track_worker
 
 
@@ -610,9 +611,6 @@ class MainWindow(QMainWindow):
         if now - getattr(self, "_last_maximize_toggle_time", 0.0) < 0.35:
             return
         self._is_toggling_maximize = True
-
-        if hasattr(self, "video_widget") and hasattr(self.video_widget, "suppress_clicks"):
-            self.video_widget.suppress_clicks(1.0)
 
         self._suspend_osd()
 
@@ -1398,6 +1396,12 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "player_controller") and self.player_controller:
             self.player_controller.stop()
+        try:
+            import gc
+            gc.collect()
+            ImageLoader.instance().clear_memory_cache()
+        except Exception:
+            pass
         self.current_channel = None
         self._current_playback_pos = 0.0
         self._current_playback_dur = 0.0
@@ -2201,6 +2205,12 @@ class MainWindow(QMainWindow):
         self._current_playback_pos = 0.0
         self._current_playback_dur = 0.0
         self.player_controller.stop()
+        try:
+            import gc
+            gc.collect()
+            ImageLoader.instance().clear_memory_cache()
+        except Exception:
+            pass
         if hasattr(self, "video_widget"):
             self.video_widget.controls.hide()
             self.series_details_view.detach_video_widget(self.video_widget)
@@ -2912,7 +2922,8 @@ class MainWindow(QMainWindow):
                 self.video_widget.video_surface.update()
             except Exception:
                 pass
-        self._refresh_chrome()
+        if not getattr(self, "is_fullscreen", False):
+            self._refresh_chrome()
         self._is_toggling_fullscreen = False
         self._last_fullscreen_toggle_time = time.monotonic()
 
@@ -2948,9 +2959,6 @@ class MainWindow(QMainWindow):
             return
         self._is_toggling_fullscreen = True
         self._last_fullscreen_toggle_time = now
-
-        if hasattr(self, "video_widget") and hasattr(self.video_widget, "suppress_clicks"):
-            self.video_widget.suppress_clicks(1.2)
 
         is_actually_fs = bool(getattr(self, "is_fullscreen", False) or self.isFullScreen())
 
@@ -3002,21 +3010,9 @@ class MainWindow(QMainWindow):
             # Aplatir le splitter sur le volet vidéo
             self.splitter.setSizes([0, 0, 100000])
             self.splitter.setHandleWidth(0)
-            self.splitter.setStyleSheet("""
-                QSplitter { background-color: #000000; border: none; margin: 0; padding: 0; }
-                QSplitter::handle { background-color: #000000; border: none; width: 0px; height: 0px; margin: 0; }
-            """)
 
-            # Tous les conteneurs en noir pur sans bordure ni marge
+            # Central widget en noir sans bordure en mode plein écran
             self.central_widget.setStyleSheet("#centralWidget { background-color: #000000; border: none; margin: 0; padding: 0; }")
-            if hasattr(self, "body_widget"):
-                self.body_widget.setStyleSheet("#bodyWidget { background-color: #000000; border: none; margin: 0; padding: 0; }")
-            self.content_stack.setStyleSheet("background-color: #000000; border: none; margin: 0; padding: 0;")
-            self.main_content_stack.setStyleSheet("background-color: #000000; border: none; margin: 0; padding: 0;")
-            self.right_container.setStyleSheet("#rightContainer { background-color: #000000; border: none; margin: 0; padding: 0; }")
-            self.video_widget.setStyleSheet("background-color: #000000; border: none; margin: 0; padding: 0;")
-            self.video_widget.stack.setStyleSheet("background-color: #000000; border: none; margin: 0; padding: 0;")
-            self.video_widget.video_surface.setStyleSheet("background-color: #000000; border: none; margin: 0; padding: 0;")
             self.video_widget.set_fullscreen(True)
             if hasattr(self, "multiview_widget"):
                 self.multiview_widget.set_fullscreen_ui(True)
@@ -3052,9 +3048,6 @@ class MainWindow(QMainWindow):
         if not is_actually_fs:
             return
 
-        if hasattr(self, "video_widget") and hasattr(self.video_widget, "suppress_clicks"):
-            self.video_widget.suppress_clicks(1.2)
-
         self._suspend_osd()
         self.is_fullscreen = False
         self.settings.window_fullscreen = False
@@ -3064,30 +3057,6 @@ class MainWindow(QMainWindow):
         self._freeze_ui()
 
         self.splitter.setHandleWidth(8)
-        self.splitter.setStyleSheet("""
-            QSplitter { background-color: #1b2232; }
-            QSplitter::handle:horizontal {
-                background-color: transparent;
-                border-left: 1px solid #28334a;
-                border-right: 1px solid #141a26;
-                margin: 0px 2px;
-            }
-            QSplitter::handle:horizontal:hover {
-                background-color: #3b82f6;
-                border: none;
-                border-radius: 2px;
-            }
-            QSplitter::handle:horizontal:pressed {
-                background-color: #2563eb;
-            }
-        """)
-        if hasattr(self, "body_widget"):
-            self.body_widget.setStyleSheet("#bodyWidget { background-color: #1b2232; }")
-        self.content_stack.setStyleSheet("background-color: #1b2232;")
-        self.main_content_stack.setStyleSheet("background-color: #111622;")
-        self.right_container.setStyleSheet("#rightContainer { background-color: #111622; }")
-        self.video_widget.setStyleSheet("background-color: #0f131d;")
-        self.video_widget.stack.setStyleSheet("background-color: #0f131d;")
         if hasattr(self, "video_widget") and hasattr(self.video_widget, "controls"):
             self.video_widget.controls.hide()
             self.video_widget.controls.hide_bars()
@@ -3554,7 +3523,6 @@ class MainWindow(QMainWindow):
     def changeEvent(self, event):
         etype = event.type()
         if etype == QEvent.Type.ActivationChange:
-            self._refresh_chrome()
             if self.isMinimized() or not self.isActiveWindow():
                 if hasattr(self, "video_widget") and hasattr(self.video_widget, "controls"):
                     self.video_widget.controls.hide()

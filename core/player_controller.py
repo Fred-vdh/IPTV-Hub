@@ -246,10 +246,10 @@ class PlayerController(QObject):
         self._gui_calls_closed = False
         self._gui_calls: Deque[Any] = collections.deque()
         self._gui_calls_lock = threading.Lock()
-        # 5 ms : les notifications de propriétés libmpv (time-pos, track-list,
-        # aid, sid, paused-for-cache...) restent perçues comme instantanées.
+        # 15 ms (~66 fps) : les notifications de propriétés libmpv (time-pos, track-list,
+        # aid, sid, paused-for-cache...) restent perçues comme instantanées sans surcharger le thread Qt.
         self._gui_pump = QTimer(self)
-        self._gui_pump.setInterval(5)
+        self._gui_pump.setInterval(15)
         self._gui_pump.timeout.connect(self._drain_gui_calls)
         self._gui_pump.start()
 
