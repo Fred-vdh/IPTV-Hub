@@ -1097,6 +1097,8 @@ class PlayerControls(QWidget):
             self.fs_btn.setIcon(get_icon("fullscreen", color=DEFAULT_ICON_COLOR))
 
     def set_tracks(self, tracks: List[Dict[str, Any]]):
+        if not tracks and self.tracks and self.has_active_media:
+            return
         self.tracks = tracks
 
     def set_chapters(self, chapters: List[Dict[str, Any]]):
@@ -1135,6 +1137,12 @@ class PlayerControls(QWidget):
             act.triggered.connect(lambda checked, v=val: self.aspect_ratio_selected.emit(v))
         menu.exec(QCursor.pos())
 
+    def _on_audio_track_picked(self, track_id: int):
+        for t in self.tracks:
+            if t.get("type") == "audio":
+                t["selected"] = (t.get("id") == track_id or str(t.get("id")) == str(track_id))
+        self.audio_track_selected.emit(track_id)
+
     def _show_audio_menu(self):
         menu = QMenu(self)
         audio_tracks = [t for t in self.tracks if t.get("type") == "audio"]
@@ -1151,8 +1159,14 @@ class PlayerControls(QWidget):
                 act = menu.addAction(display_name)
                 act.setCheckable(True)
                 act.setChecked(bool(t.get("selected")))
-                act.triggered.connect(lambda checked, track_id=tid: self.audio_track_selected.emit(track_id))
+                act.triggered.connect(lambda checked, track_id=tid: self._on_audio_track_picked(track_id))
         menu.exec(QCursor.pos())
+
+    def _on_subtitle_track_picked(self, track_id: int):
+        for t in self.tracks:
+            if t.get("type") == "sub":
+                t["selected"] = (track_id > 0 and (t.get("id") == track_id or str(t.get("id")) == str(track_id)))
+        self.subtitle_track_selected.emit(track_id)
 
     def _show_subtitles_menu(self):
         menu = QMenu(self)
@@ -1162,7 +1176,7 @@ class PlayerControls(QWidget):
         act_none = menu.addAction("Désactiver les sous-titres")
         act_none.setCheckable(True)
         act_none.setChecked(selected_track is None)
-        act_none.triggered.connect(lambda: self.subtitle_track_selected.emit(0))
+        act_none.triggered.connect(lambda: self._on_subtitle_track_picked(0))
         menu.addSeparator()
 
         for t in sub_tracks:
@@ -1173,7 +1187,7 @@ class PlayerControls(QWidget):
             act = menu.addAction(display_name)
             act.setCheckable(True)
             act.setChecked(bool(t.get("selected")))
-            act.triggered.connect(lambda checked, track_id=tid: self.subtitle_track_selected.emit(track_id))
+            act.triggered.connect(lambda checked, track_id=tid: self._on_subtitle_track_picked(track_id))
         menu.exec(QCursor.pos())
 
     def is_mouse_on_bars(self, global_pos: Optional[QPoint] = None) -> bool:

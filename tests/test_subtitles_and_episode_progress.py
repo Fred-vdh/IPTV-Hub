@@ -206,6 +206,62 @@ class TestSubtitlesAndEpisodeProgress(unittest.TestCase):
         card2_updated = view.episodes_grid.itemAt(1).widget()
         self.assertAlmostEqual(card2_updated.progress_ratio, 0.3, places=2)
 
+    def test_audio_and_subtitle_selection_does_not_wipe_tracks_or_revert(self):
+        """Vérifie que la sélection manuelle de piste audio ou sous-titre ne vide pas la liste et n'est pas révoquée."""
+        controller = PlayerController(
+            preferred_audio_lang="fra",
+            preferred_subtitle_lang="off",
+            subtitles_enabled=False
+        )
+        mock_mpv = MockMpv()
+        controller._player = mock_mpv
+
+        tracks = [
+            {"type": "video", "id": 1},
+            {"type": "audio", "id": 1, "lang": "fra", "title": "Français VF", "selected": True},
+            {"type": "audio", "id": 2, "lang": "eng", "title": "English VO", "selected": False},
+            {"type": "sub", "id": 1, "lang": "fra", "title": "Français", "selected": False},
+            {"type": "sub", "id": 2, "lang": "eng", "title": "English", "selected": False},
+        ]
+        mock_mpv["track-list"] = tracks
+        mock_mpv["aid"] = 1
+        mock_mpv["sid"] = "no"
+
+        # Simuler l'arrivée initiale de la liste de pistes
+        controller._on_track_list("track-list", tracks)
+        self.assertTrue(controller._audio_auto_selected)
+
+        # L'utilisateur choisit la piste audio anglaise (id 2)
+        controller.set_audio_track(2)
+        self.assertTrue(controller._user_selected_audio)
+        self.assertEqual(mock_mpv["aid"], 2)
+
+        # Simuler un événement track-list subséquent envoyé par MPV
+        # L'auto-sélection ne doit PAS réinitialiser aid à 1
+        controller._on_track_list("track-list", tracks)
+        self.assertEqual(mock_mpv["aid"], 2)
+
+        # Vérifier que les pistes synchronisées contiennent toujours les 5 pistes
+        synced = controller._get_synchronized_track_list()
+        self.assertEqual(len(synced), 5)
+        audios = [t for t in synced if t.get("type") == "audio"]
+        self.assertEqual(len(audios), 2)
+        self.assertTrue(any(t.get("id") == 2 and t.get("selected") for t in audios))
+
+        # L'utilisateur active la piste sous-titres anglaise (id 2)
+        controller.set_subtitle_track(2)
+        self.assertTrue(controller._user_selected_subtitles)
+        self.assertEqual(mock_mpv["sid"], 2)
+
+        # Un événement track-list subséquent ne doit pas révoquer la sélection
+        controller._on_track_list("track-list", tracks)
+        self.assertEqual(mock_mpv["sid"], 2)
+
+        synced = controller._get_synchronized_track_list()
+        subs = [t for t in synced if t.get("type") == "sub"]
+        self.assertEqual(len(subs), 2)
+        self.assertTrue(any(t.get("id") == 2 and t.get("selected") for t in subs))
+
 
 if __name__ == "__main__":
     unittest.main()

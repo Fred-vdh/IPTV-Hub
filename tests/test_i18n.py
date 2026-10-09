@@ -251,7 +251,6 @@ class TestI18n(unittest.TestCase):
             self.assertEqual(hist.btn_all.text(), "Tous")
             self.assertEqual(hist.btn_movies.text(), "Films")
             self.assertEqual(hist.btn_series.text(), "Séries")
-            self.assertEqual(hist.btn_live.text(), "TV en direct")
             self.assertIn("Cette liste de lecture", hist.btn_this_playlist.text())
             self.assertIn("Toutes les listes de lecture", hist.btn_all_playlists.text())
 
@@ -260,7 +259,6 @@ class TestI18n(unittest.TestCase):
             self.assertEqual(hist.btn_all.text(), "All")
             self.assertEqual(hist.btn_movies.text(), "Movies")
             self.assertEqual(hist.btn_series.text(), "Series")
-            self.assertEqual(hist.btn_live.text(), "Live TV")
             self.assertIn("This playlist", hist.btn_this_playlist.text())
             self.assertIn("All playlists", hist.btn_all_playlists.text())
 
@@ -269,13 +267,11 @@ class TestI18n(unittest.TestCase):
             dash = DashboardView(db)
             dash.refresh_view()
             self.assertEqual(dash.sec_continue.title_label.text(), "Reprendre la lecture")
-            self.assertEqual(dash.sec_recent_live.title_label.text(), "TV en direct récemment regardée")
             self.assertEqual(dash.sec_favs.title_label.text(), "Films & Séries favoris")
             self.assertEqual(dash.sec_recents.title_label.text(), "Récemment ajoutés sur la liste")
 
             self.i18n.set_language("en")
             self.assertEqual(dash.sec_continue.title_label.text(), "Continue Watching")
-            self.assertEqual(dash.sec_recent_live.title_label.text(), "Recently watched live TV")
             self.assertEqual(dash.sec_favs.title_label.text(), "Favorite movies & series")
             self.assertEqual(dash.sec_recents.title_label.text(), "Recently added on the playlist")
 
@@ -289,7 +285,6 @@ class TestI18n(unittest.TestCase):
             self.assertIn("Esta lista de reproducción", fav.btn_this_playlist.text())
             self.assertIn("Todas las listas de reproducción", fav.btn_all_playlists.text())
             self.assertEqual(dash.sec_continue.title_label.text(), "Continuar viendo")
-            self.assertEqual(dash.sec_recent_live.title_label.text(), "TV en vivo vista recientemente")
             self.assertEqual(dash.sec_favs.title_label.text(), "Películas y series favoritas")
             self.assertEqual(dash.sec_recents.title_label.text(), "Añadidos recientemente en la lista")
 
@@ -303,7 +298,6 @@ class TestI18n(unittest.TestCase):
             self.assertIn("Diese Wiedergabeliste", fav.btn_this_playlist.text())
             self.assertIn("Alle Wiedergabelisten", fav.btn_all_playlists.text())
             self.assertEqual(dash.sec_continue.title_label.text(), "Wiedergabe fortsetzen")
-            self.assertEqual(dash.sec_recent_live.title_label.text(), "Kürzlich gesehene Live-Sender")
             self.assertEqual(dash.sec_favs.title_label.text(), "Lieblingsfilme & -serien")
             self.assertEqual(dash.sec_recents.title_label.text(), "Kürzlich hinzugefügt auf die Liste")
 

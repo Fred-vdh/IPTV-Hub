@@ -215,6 +215,12 @@ class PlayerController(QObject):
         self._eof_reported = False
         self._is_stopping = False
 
+        self._last_raw_tracks: list = []
+        self._audio_auto_selected: bool = False
+        self._subtitles_auto_selected: bool = False
+        self._user_selected_audio: bool = False
+        self._user_selected_subtitles: bool = False
+
         self._last_progress_monotonic: float = 0.0
         self._stall_start_monotonic: Optional[float] = None
         self._is_user_paused: bool = False
@@ -307,23 +313,43 @@ class PlayerController(QObject):
         if not self._player:
             return default
         try:
+            k_dash = key.replace("_", "-")
+            k_under = key.replace("-", "_")
             if hasattr(self._player, "get_property"):
-                val = self._player.get_property(key)
-                return val if val is not None else default
+                val = self._player.get_property(k_dash)
+                if val is None:
+                    val = self._player.get_property(key)
+                if val is not None:
+                    return val
             if isinstance(self._player, dict):
-                return self._player.get(key, default)
-            return getattr(self._player, key, default)
+                val = self._player.get(k_dash)
+                if val is None:
+                    val = self._player.get(k_under)
+                if val is not None:
+                    return val
+            if hasattr(self._player, k_under):
+                val = getattr(self._player, k_under, None)
+                if val is not None:
+                    return val
+            if hasattr(self._player, key):
+                val = getattr(self._player, key, None)
+                if val is not None:
+                    return val
+            return default
         except Exception:
             return default
 
     def _get_synchronized_track_list(self, raw_tracks: Optional[list] = None) -> list:
         """Retourne la liste des pistes avec l'attribut 'selected' synchronisé sur l'état effectif de MPV."""
-        if raw_tracks is None and self._player:
+        if not raw_tracks:
+            raw_tracks = getattr(self, "_last_raw_tracks", None)
+        if not raw_tracks and self._player:
             try:
-                if hasattr(self._player, "get_property"):
-                    raw_tracks = self._player.get_property("track-list") or []
-                elif isinstance(self._player, dict):
-                    raw_tracks = self._player.get("track-list") or []
+                raw = getattr(self._player, "track_list", None)
+                if raw is None:
+                    raw = self._get_player_prop("track-list")
+                if isinstance(raw, list):
+                    raw_tracks = raw
             except Exception:
                 raw_tracks = []
         if not raw_tracks:
@@ -343,11 +369,15 @@ class PlayerController(QObject):
             if t_type == "sub":
                 if not self._subtitles_enabled or self._preferred_subtitle_lang == "off" or curr_sid in (None, False, "no", 0, "0"):
                     t_copy["selected"] = False
-                else:
+                elif curr_sid not in (None, False, "no", "auto", 0, "0"):
                     t_copy["selected"] = (curr_sid == t_id or str(curr_sid) == str(t_id))
+                else:
+                    t_copy["selected"] = bool(t.get("selected"))
             elif t_type == "audio":
-                if curr_aid not in (None, False, "no", 0, "0"):
+                if curr_aid not in (None, False, "no", "auto", 0, "0"):
                     t_copy["selected"] = (curr_aid == t_id or str(curr_aid) == str(t_id))
+                else:
+                    t_copy["selected"] = bool(t.get("selected"))
 
             synced.append(t_copy)
         return synced
@@ -674,14 +704,24 @@ class PlayerController(QObject):
     @_mpv_callback_in_qt_thread
     def _on_track_list(self, name, value):
         if value is not None and isinstance(value, list):
+            self._last_raw_tracks = value
             has_tracks = any(t.get("type") in ("video", "audio") for t in value if isinstance(t, dict))
             if has_tracks:
                 self._stream_has_started = True
                 if self._stream_watchdog.isActive():
                     self._stream_watchdog.stop()
                 self._set_state("playing")
-            self._auto_select_preferred_audio(value)
-            self._auto_select_preferred_subtitles(value)
+
+            if not getattr(self, "_user_selected_audio", False) and not getattr(self, "_audio_auto_selected", False):
+                if any(t.get("type") == "audio" for t in value if isinstance(t, dict)):
+                    self._auto_select_preferred_audio(value)
+                    self._audio_auto_selected = True
+
+            if not getattr(self, "_user_selected_subtitles", False) and not getattr(self, "_subtitles_auto_selected", False):
+                if any(t.get("type") == "sub" for t in value if isinstance(t, dict)):
+                    self._auto_select_preferred_subtitles(value)
+                    self._subtitles_auto_selected = True
+
             synced_tracks = self._get_synchronized_track_list(value)
             self.tracks_changed.emit(synced_tracks)
 
@@ -925,6 +965,11 @@ class PlayerController(QObject):
         self._eof_reported = False
         self._is_vod = False
         self._is_user_paused = False
+        self._last_raw_tracks = []
+        self._audio_auto_selected = False
+        self._subtitles_auto_selected = False
+        self._user_selected_audio = False
+        self._user_selected_subtitles = False
         self._last_progress_monotonic = time.monotonic()
         self._stall_start_monotonic = None
         self._stream_watchdog.start()
@@ -1027,6 +1072,11 @@ class PlayerController(QObject):
         self._is_vod = False
         self._stall_start_monotonic = None
         self._is_user_paused = False
+        self._last_raw_tracks = []
+        self._audio_auto_selected = False
+        self._subtitles_auto_selected = False
+        self._user_selected_audio = False
+        self._user_selected_subtitles = False
         if self._player:
             try:
                 self._player.command("stop")
@@ -1080,11 +1130,12 @@ class PlayerController(QObject):
         """Bascule sur une piste audio spécifique et mémorise la langue si disponible."""
         if self._player:
             try:
+                self._user_selected_audio = True
                 self._player["aid"] = track_id
-                tracks = self._get_player_prop("track-list") or []
+                tracks = getattr(self, "_last_raw_tracks", None) or self._get_player_prop("track_list") or []
                 chosen_track = None
                 for t in tracks:
-                    if t.get("type") == "audio" and t.get("id") == track_id:
+                    if isinstance(t, dict) and t.get("type") == "audio" and (t.get("id") == track_id or str(t.get("id")) == str(track_id)):
                         chosen_track = t
                         break
                 if chosen_track:
@@ -1095,10 +1146,6 @@ class PlayerController(QObject):
                         else:
                             alang_val = family
                         self._preferred_audio_lang = alang_val
-                        try:
-                            self._player["alang"] = alang_val
-                        except Exception:
-                            pass
                         self.audio_preference_changed.emit(alang_val)
                 self.tracks_changed.emit(self._get_synchronized_track_list())
             except Exception as e:
@@ -1122,13 +1169,14 @@ class PlayerController(QObject):
         """Bascule sur une piste de sous-titres spécifique (0 pour désactiver)."""
         if self._player:
             try:
+                self._user_selected_subtitles = True
                 if track_id > 0:
                     self._player["sid"] = track_id
                     self._subtitles_enabled = True
-                    tracks = self._get_player_prop("track-list") or []
+                    tracks = getattr(self, "_last_raw_tracks", None) or self._get_player_prop("track_list") or []
                     chosen_track = None
                     for t in tracks:
-                        if t.get("type") == "sub" and t.get("id") == track_id:
+                        if isinstance(t, dict) and t.get("type") == "sub" and (t.get("id") == track_id or str(t.get("id")) == str(track_id)):
                             chosen_track = t
                             break
 
@@ -1145,24 +1193,12 @@ class PlayerController(QObject):
                     else:
                         self._preferred_subtitle_lang = family
 
-                    if family in LANGUAGE_GROUPS:
-                        slang_val = ",".join(LANGUAGE_GROUPS[family][0])
-                    else:
-                        slang_val = family
-                    try:
-                        self._player["slang"] = slang_val
-                    except Exception:
-                        pass
                     self.subtitle_preference_changed.emit(self._preferred_subtitle_lang, True)
                 else:
                     self._player["sid"] = "no"
                     self._subtitles_enabled = False
                     self._preferred_subtitle_lang = "off"
                     self._preferred_subtitle_forced = False
-                    try:
-                        self._player["slang"] = "no"
-                    except Exception:
-                        pass
                     self.subtitle_preference_changed.emit("off", False)
 
                 self.tracks_changed.emit(self._get_synchronized_track_list())
