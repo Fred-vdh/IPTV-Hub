@@ -440,7 +440,6 @@ def match_artist_credits_with_library(
 
     seen_movie_ids = set()
     seen_series_ids = set()
-    seen_directed_ids = set()
 
     def _find_best_match(
         target_dict: Dict[str, List[Any]],
@@ -529,10 +528,30 @@ def match_artist_credits_with_library(
                     "poster_path": item.get("poster_path", ""),
                 })
 
-    # 2. Traitement des rôles de réalisation (Crew -> Director)
+    # 2. Traitement des rôles de réalisation / création / scénario (Crew)
+    DIRECTING_JOBS = {"Director", "Series Director"}
+    CO_DIRECTING_JOBS = {"Co-Director"}
+    CREATOR_JOBS = {"Creator", "Original Series Creator", "Co-Creator"}
+    WRITING_JOBS = {"Writer", "Screenplay", "Author", "Scenario Writer"}
+
+    directed_map: Dict[int, Dict[str, Any]] = {}
+    directed_order: List[int] = []
+
     for item in crew_list:
-        if item.get("job") != "Director":
+        job = item.get("job", "") or ""
+        dept = item.get("department", "") or ""
+
+        is_valid_crew = (
+            job in DIRECTING_JOBS
+            or job in CO_DIRECTING_JOBS
+            or job in CREATOR_JOBS
+            or dept == "Creator"
+            or job in WRITING_JOBS
+            or (dept == "Writing" and job in ("Story", "Teleplay"))
+        )
+        if not is_valid_crew:
             continue
+
         m_type = item.get("media_type")
         fr_t = item.get("title") if m_type == "movie" else item.get("name")
         orig_t = item.get("original_title") if m_type == "movie" else item.get("original_name")
@@ -541,18 +560,54 @@ def match_artist_credits_with_library(
 
         target_dict = movies_by_norm if m_type == "movie" else series_by_norm
         match = _find_best_match(target_dict, fr_t or "", orig_t or "", yr, is_movie=(m_type == "movie"))
-        if match and match.id not in seen_directed_ids:
-            seen_directed_ids.add(match.id)
-            result["directed"].append({
-                "channel": match,
-                "role": "Réalisateur",
-                "character": "Réalisateur",
-                "title": fr_t or match.name,
-                "media_type": m_type,
-                "year": yr or getattr(match, "year", ""),
-                "rating": str(item.get("vote_average", ""))[:3],
-                "poster_path": item.get("poster_path", ""),
-            })
+        if match:
+            if match.id not in directed_map:
+                directed_map[match.id] = {
+                    "channel": match,
+                    "jobs": set(),
+                    "title": fr_t or match.name,
+                    "media_type": m_type,
+                    "year": yr or getattr(match, "year", ""),
+                    "rating": str(item.get("vote_average", ""))[:3],
+                    "poster_path": item.get("poster_path", ""),
+                }
+                directed_order.append(match.id)
+
+            if job:
+                directed_map[match.id]["jobs"].add(job)
+            if dept == "Creator":
+                directed_map[match.id]["jobs"].add("Creator")
+
+    for mid in directed_order:
+        info = directed_map[mid]
+        jobs = info["jobs"]
+        if (jobs & CREATOR_JOBS) or ("Creator" in jobs):
+            if jobs & DIRECTING_JOBS:
+                role = "Créateur / Réalisateur"
+            else:
+                role = "Créateur"
+        elif jobs & DIRECTING_JOBS:
+            if jobs & WRITING_JOBS:
+                role = "Réalisateur / Scénariste"
+            else:
+                role = "Réalisateur"
+        elif jobs & CO_DIRECTING_JOBS:
+            role = "Coréalisateur"
+        elif jobs & WRITING_JOBS:
+            role = "Scénariste"
+        else:
+            role = "Réalisateur"
+
+        result["directed"].append({
+            "channel": info["channel"],
+            "role": role,
+            "character": role,
+            "title": info["title"],
+            "media_type": info["media_type"],
+            "year": info["year"],
+            "rating": info["rating"],
+            "poster_path": info["poster_path"],
+        })
 
     return result
 

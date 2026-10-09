@@ -489,7 +489,18 @@ class ArtistFilmographyDialog(QDialog):
             )
 
         dept = details.get("known_for_department", "")
-        dept_fr = tr("Acteur / Actrice") if dept == "Acting" else (tr("Réalisateur") if dept == "Directing" else dept)
+        dept_translations = {
+            "Acting": tr("Acteur / Actrice"),
+            "Directing": tr("Réalisateur"),
+            "Writing": tr("Scénariste / Créateur"),
+            "Creator": tr("Créateur"),
+            "Production": tr("Producteur"),
+            "Camera": tr("Directeur de la photographie"),
+            "Editing": tr("Montage"),
+            "Sound": tr("Musique / Son"),
+            "Visual Effects": tr("Effets visuels"),
+        }
+        dept_fr = dept_translations.get(dept, dept)
         
         b_day = details.get("birthday", "")
         place = details.get("place_of_birth", "")
@@ -540,10 +551,19 @@ class ArtistFilmographyDialog(QDialog):
                 is_movie=False
             )
 
-        # Section Réalisateur
+        # Section Réalisateur / Créateur
         if directed:
+            has_director = any("Réalisat" in d.get("role", "") for d in directed)
+            has_creator = any("Créat" in d.get("role", "") or "Scénar" in d.get("role", "") for d in directed)
+            if has_director and has_creator:
+                sec_title = tr("🎥 En tant que Réalisateur / Créateur ({count})", count=len(directed))
+            elif has_creator:
+                sec_title = tr("✍️ En tant que Créateur ({count})", count=len(directed))
+            else:
+                sec_title = tr("🎥 En tant que Réalisateur ({count})", count=len(directed))
+
             self._add_section(
-                title=tr("🎥 En tant que Réalisateur ({count})", count=len(directed)),
+                title=sec_title,
                 items=directed,
                 is_movie=None
             )
@@ -729,7 +749,14 @@ class ArtistSuggestionItemWidget(QWidget):
         text_vbox.addWidget(name_lbl)
 
         dept = person.get("known_for_department", "")
-        dept_fr = "Acteur" if dept == "Acting" else ("Réalisateur" if dept == "Directing" else dept)
+        dept_translations_short = {
+            "Acting": "Acteur",
+            "Directing": "Réalisateur",
+            "Writing": "Scénariste / Créateur",
+            "Creator": "Créateur",
+            "Production": "Producteur",
+        }
+        dept_fr = dept_translations_short.get(dept, dept)
         known_items = [
             x.get("title") or x.get("name")
             for x in person.get("known_for", [])

@@ -103,6 +103,72 @@ class TestArtistFilmography(unittest.TestCase):
         self.assertEqual(dialog.get_artist_name(), "Christopher Nolan")
         dialog._stop_worker()
 
+    def test_match_artist_creator_and_writer(self):
+        """Vérifie que les créateurs de séries (comme Bill Lawrence pour Spin City) sont bien inclus dans 'directed'."""
+        library = [
+            Channel(id=10, name="|FR| Spin City (1996)", stream_type="series", year="1996"),
+            Channel(id=11, name="|FR| Scrubs", stream_type="series", year="2001"),
+        ]
+
+        fake_credits = {
+            "combined_credits": {
+                "cast": [],
+                "crew": [
+                    {
+                        "job": "Creator",
+                        "department": "Creator",
+                        "media_type": "tv",
+                        "name": "Spin City",
+                        "original_name": "Spin City",
+                        "first_air_date": "1996-09-17",
+                        "vote_average": 7.0
+                    },
+                    {
+                        "job": "Writer",
+                        "department": "Writing",
+                        "media_type": "tv",
+                        "name": "Spin City",
+                        "original_name": "Spin City",
+                        "first_air_date": "1996-09-17",
+                        "vote_average": 7.0
+                    },
+                    {
+                        "job": "Creator",
+                        "department": "Creator",
+                        "media_type": "tv",
+                        "name": "Scrubs",
+                        "original_name": "Scrubs",
+                        "first_air_date": "2001-10-02",
+                        "vote_average": 8.0
+                    },
+                    {
+                        "job": "Director",
+                        "department": "Directing",
+                        "media_type": "tv",
+                        "name": "Scrubs",
+                        "original_name": "Scrubs",
+                        "first_air_date": "2001-10-02",
+                        "vote_average": 8.0
+                    }
+                ]
+            }
+        }
+
+        matched = match_artist_credits_with_library(fake_credits, library)
+        directed = matched.get("directed", [])
+        self.assertEqual(len(directed), 2)
+
+        # Spin City doit être présent avec le rôle Créateur
+        spin_city = next((x for x in directed if x["channel"].id == 10), None)
+        self.assertIsNotNone(spin_city, "Spin City doit être présent dans la filmographie de réalisation/création")
+        self.assertEqual(spin_city["role"], "Créateur")
+
+        # Scrubs doit être présent avec le rôle combiné Créateur / Réalisateur
+        scrubs = next((x for x in directed if x["channel"].id == 11), None)
+        self.assertIsNotNone(scrubs)
+        self.assertEqual(scrubs["role"], "Créateur / Réalisateur")
+
 
 if __name__ == "__main__":
     unittest.main()
+
