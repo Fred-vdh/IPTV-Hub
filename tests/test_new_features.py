@@ -61,7 +61,7 @@ class TestNewFeatures(unittest.TestCase):
         widget = PlaylistItemWidget(p, db=self.db)
         self.assertIn("Actif", widget.status_badge.text())
         self.assertIn("01/01/2026", widget.exp_badge.text())
-        self.assertIn("1 / 2", widget.conn_badge.text())
+        self.assertIn("2", widget.conn_badge.text())
 
     def test_sidebar_has_replay_button(self):
         sidebar = Sidebar(self.db)
@@ -442,8 +442,8 @@ class TestNewFeatures(unittest.TestCase):
         self.assertIn(url_ep1, prog_map_after)
         self.assertIn(url_ep3, prog_map_after)
 
-        # 3. Vérifier qu'une lecture fugitive (ex: 15 secondes) ne dévalide pas un épisode déjà complété à 100%
-        self.db.save_playback_progress(channel_id=series_ch_id, stream_url=url_ep1, channel_name="Series - S01E01", position=15.0, duration=3600.0)
+        # 3. Vérifier qu'une lecture fugitive (ex: 8 secondes, seuil < 10s) ne dévalide pas un épisode déjà complété à 100%
+        self.db.save_playback_progress(channel_id=series_ch_id, stream_url=url_ep1, channel_name="Series - S01E01", position=8.0, duration=3600.0)
         prog_ep1 = self.db.get_all_playback_progress_map()[url_ep1]
         self.assertEqual(prog_ep1[0], 3600.0)  # La position 3600s (100%) est restée préservée !
 

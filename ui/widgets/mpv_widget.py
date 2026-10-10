@@ -558,7 +558,10 @@ class MPVVideoWidget(QWidget):
             self.stack.setCurrentIndex(0)
             self.video_surface.set_rendering_active(False)
             self.controls.set_playing_state("stopped")
-            self.controls.hide()
+            if getattr(self.controls, "current_channel", None):
+                self._show_osd()
+            else:
+                self.controls.hide()
             self.show_mouse_cursor()
             self.osd_timer.stop()
 

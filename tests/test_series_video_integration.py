@@ -11,7 +11,7 @@ from core.models import Channel, Playlist
 from core.database import Database
 from core.player_controller import PlayerController
 from core.xtream_client import XtreamClient
-from ui.widgets.series_details_view import SeriesDetailsView
+from ui.widgets.series_details_view import SeriesDetailsView, _SeriesTrailerLookupWorker
 from ui.widgets.mpv_widget import MPVVideoWidget
 
 # Référence module-level indispensable pour éviter le GC de QApplication
@@ -86,8 +86,7 @@ def _run_series_details_video_integration():
     assert view.details_layout.itemAt(0).widget() == view.hero_banner, "Hors vidéo, la description doit être en premier"
     assert view.details_layout.itemAt(1).widget() == view.seasons_container, "Hors vidéo, les saisons doivent être en dessous"
 
-    player_controller = PlayerController()
-    video_widget = MPVVideoWidget(player_controller)
+    video_widget = MPVVideoWidget()
     video_widget.resize(600, 400)
 
     try:
@@ -137,7 +136,6 @@ def _run_series_details_video_integration():
     finally:
         view.stop_workers()
         view.close()
-        player_controller.cleanup()
         temp_dir.cleanup()
         QApplication.processEvents()
 
@@ -223,13 +221,15 @@ class TestSeriesVideoIntegration(unittest.TestCase):
     def test_series_details_video_integration(self):
         with patch.object(XtreamClient, "get_series_info", return_value={"info": {}, "seasons": [], "episodes": {}}), \
              patch("core.tmdb_client.find_best_trailer", return_value={}), \
-             patch("core.introdb_client.get_imdb_id_for_series", return_value=None):
+             patch("core.introdb_client.get_imdb_id_for_series", return_value=None), \
+             patch.object(_SeriesTrailerLookupWorker, "run", lambda self: self.finished_trailer.emit({})):
             _run_series_details_video_integration()
 
     def test_main_window_series_navigation(self):
         with patch.object(XtreamClient, "get_series_info", return_value={"info": {}, "seasons": [], "episodes": {}}), \
              patch("core.tmdb_client.find_best_trailer", return_value={}), \
              patch("core.introdb_client.get_imdb_id_for_series", return_value=None), \
+             patch.object(_SeriesTrailerLookupWorker, "run", lambda self: self.finished_trailer.emit({})), \
              patch.object(PlayerController, "play"):
             _run_main_window_series_navigation()
 

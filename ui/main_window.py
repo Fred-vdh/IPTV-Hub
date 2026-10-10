@@ -844,8 +844,10 @@ class MainWindow(QMainWindow):
             from core.models import prioritize_categories
             cat_list = prioritize_categories(groups)
 
-        prev_custom_list_id = getattr(self.channel_panel, "current_custom_list_id", None) or getattr(self.categories_panel, "_current_selected_custom_list_id", None)
-        current_selected_cat = getattr(self.categories_panel, "_current_selected_cat", "") or getattr(self.channel_panel, "current_selected_category", "")
+        ch_panel = getattr(self, "channel_panel", None)
+        cat_panel = getattr(self, "categories_panel", None)
+        prev_custom_list_id = getattr(ch_panel, "current_custom_list_id", None) or getattr(cat_panel, "_current_selected_custom_list_id", None)
+        current_selected_cat = getattr(cat_panel, "_current_selected_cat", "") or getattr(ch_panel, "current_selected_category", "")
         available_cat_names = [g[0] for g in cat_list]
         target_cat = current_selected_cat if current_selected_cat in available_cat_names else (cat_list[0][0] if cat_list else "")
 
@@ -1553,16 +1555,13 @@ class MainWindow(QMainWindow):
             self.video_widget.skip_intro_overlay.hide()
         if not self.current_channel:
             return
-        # Ne concerne QUE les séries : jamais les films ni la TV en direct.
-        if self.current_channel.stream_type != "series":
-            return
 
-        pos = self._current_playback_pos
-        dur = self._current_playback_dur
+        pos = getattr(self, "_current_playback_pos", 0.0)
+        dur = getattr(self, "_current_playback_dur", 0.0)
 
         # Sécurité critique : vérifier que l'on est RÉELLEMENT à la fin du fichier vidéo
-        # avant de marquer à 100% et d'enchaîner. Un arrêt utilisateur, un EOF MPV prématuré
-        # ou une interruption réseau ne doit JAMAIS marquer un épisode non terminé comme lu.
+        # avant de marquer à 100% et d'enchaîner ou de revenir sur la fiche. Un arrêt prématuré,
+        # un EOF MPV prématuré ou une coupure réseau ne doit JAMAIS marquer un média non terminé comme lu.
         is_truly_at_end = (
             dur > 60 and (
                 pos >= dur * 0.85
@@ -1573,20 +1572,30 @@ class MainWindow(QMainWindow):
             self._save_current_playback_progress()
             return
 
-        # 1. Marquer l'épisode qui vient de se terminer comme vu à 100%
-        old_ep = self.current_channel
-        effective_dur = dur if dur > 0 else (pos if pos > 0 else 3600.0)
-        self.db.save_playback_progress(
-            channel_id=old_ep.id,
-            stream_url=old_ep.stream_url,
-            channel_name=old_ep.name,
-            position=effective_dur,
-            duration=effective_dur
-        )
+        # 1. Traitement spécifique des Séries
+        if self.current_channel.stream_type == "series":
+            # Marquer l'épisode qui vient de se terminer comme vu à 100%
+            old_ep = self.current_channel
+            effective_dur = dur if dur > 0 else (pos if pos > 0 else 3600.0)
+            self._current_playback_pos = effective_dur
+            self._current_playback_dur = effective_dur
+            self.db.save_playback_progress(
+                channel_id=old_ep.id,
+                stream_url=old_ep.stream_url,
+                channel_name=old_ep.name,
+                position=effective_dur,
+                duration=effective_dur
+            )
 
-        # Si l'enchaînement automatique est désactivé, arrêter la lecture ici et mémoriser l'état
-        if not getattr(self.settings, "auto_play_next_episode", True):
+            # Si l'enchaînement automatique est activé, tenter d'enchaîner sur l'épisode suivant
+            if getattr(self.settings, "auto_play_next_episode", True):
+                if self._play_next_series_episode():
+                    return
+
+            # Fin de la série ou lecture auto désactivée : arrêt propre et affichage de l'OSD / retour
             self._stopped_at_episode_end = True
+            if getattr(self, "is_fullscreen", False) or (hasattr(self, "isFullScreen") and self.isFullScreen()):
+                self._exit_fullscreen()
             if hasattr(self, "series_details_view"):
                 self.series_details_view.refresh_progress()
             if hasattr(self, "video_widget") and hasattr(self.video_widget, "controls"):
@@ -1594,8 +1603,20 @@ class MainWindow(QMainWindow):
                 self.video_widget.controls.set_playing_state("stopped")
             return
 
-        # 2. Enchaîner sur l'épisode suivant
-        self._play_next_series_episode()
+        # 2. Traitement des Films VOD ou autres médias à durée finie
+        old_movie = self.current_channel
+        effective_dur = dur if dur > 0 else (pos if pos > 0 else 7200.0)
+        self._current_playback_pos = effective_dur
+        self._current_playback_dur = effective_dur
+        self.db.save_playback_progress(
+            channel_id=old_movie.id,
+            stream_url=old_movie.stream_url,
+            channel_name=old_movie.name,
+            position=effective_dur,
+            duration=effective_dur
+        )
+        self._stopped_at_episode_end = False
+        self._return_to_vod_grid()
 
     def _play_previous_channel(self):
         if not self.current_channel:
@@ -2204,7 +2225,8 @@ class MainWindow(QMainWindow):
         self.current_channel = None
         self._current_playback_pos = 0.0
         self._current_playback_dur = 0.0
-        self.player_controller.stop()
+        if hasattr(self, "player_controller") and self.player_controller:
+            self.player_controller.stop()
         try:
             import gc
             gc.collect()
@@ -2408,7 +2430,8 @@ class MainWindow(QMainWindow):
         self.current_channel = None
         self._current_playback_pos = 0.0
         self._current_playback_dur = 0.0
-        self.player_controller.stop()
+        if hasattr(self, "player_controller") and self.player_controller:
+            self.player_controller.stop()
         if hasattr(self, "video_widget"):
             self.video_widget.controls.hide()
             self.movie_details_view.detach_video_widget(self.video_widget)
@@ -2486,7 +2509,7 @@ class MainWindow(QMainWindow):
 
     def _return_to_vod_grid(self):
         """Retourne à la vue précédente (Fiche film, Fiche série, Galerie), quitte le plein écran si actif et coupe la lecture."""
-        if self.is_fullscreen:
+        if getattr(self, "is_fullscreen", False) or (hasattr(self, "isFullScreen") and self.isFullScreen()):
             self._exit_fullscreen()
 
         if getattr(self, "_is_playing_trailer", False):
@@ -2502,49 +2525,52 @@ class MainWindow(QMainWindow):
             return
 
         self._save_current_playback_progress()
-        self.player_controller.stop()
-        self.video_widget.controls.hide()
+        if hasattr(self, "player_controller") and self.player_controller:
+            self.player_controller.stop()
+        if hasattr(self, "video_widget") and hasattr(self.video_widget, "controls"):
+            self.video_widget.controls.hide()
 
         # Quitter la TV en direct (bouton retour) désactive aussi le Multiview.
         self._leave_multiview()
 
-        if self.current_section == "dashboard":
+        sec = getattr(self, "current_section", "vod")
+        if sec == "dashboard" and hasattr(self, "dashboard_view") and hasattr(self, "content_stack"):
             self.content_stack.setCurrentIndex(4)
             self._update_search_placeholder("dashboard", clear_text=True)
             self.dashboard_view.refresh_view()
             return
 
-        if self.current_section == "favorites":
+        if sec == "favorites" and hasattr(self, "favorites_view") and hasattr(self, "content_stack"):
             self.content_stack.setCurrentIndex(2)
             self._update_search_placeholder("favorites", clear_text=True)
             self.favorites_view.refresh_view()
             return
 
-        if self.current_section == "history":
+        if sec == "history" and hasattr(self, "history_view") and hasattr(self, "content_stack"):
             self.content_stack.setCurrentIndex(6)
             self._update_search_placeholder("history", clear_text=True)
             self.history_view.refresh_view()
             return
 
-        if self.current_section == "recently_added":
+        if sec == "recently_added" and hasattr(self, "recently_added_view") and hasattr(self, "content_stack"):
             self.content_stack.setCurrentIndex(3)
             self._update_search_placeholder("recently_added", clear_text=True)
             self.recently_added_view.refresh_view()
             return
 
-        if self.current_section == "epg":
+        if sec == "epg" and hasattr(self, "epg_grid_view") and hasattr(self, "content_stack"):
             self.content_stack.setCurrentIndex(5)
             self._update_search_placeholder("epg", clear_text=True)
             self.epg_grid_view.refresh_view()
             return
 
-        if self.current_section == "replay":
+        if sec == "replay" and hasattr(self, "replay_view") and hasattr(self, "content_stack"):
             self.content_stack.setCurrentIndex(7)
             self._update_search_placeholder("replay", clear_text=True)
             self.replay_view.refresh_view()
             return
 
-        if self.current_section == "downloads" or getattr(self, "_return_target_index", 1) == 8:
+        if (sec == "downloads" or getattr(self, "_return_target_index", 1) == 8) and hasattr(self, "downloads_view") and hasattr(self, "content_stack"):
             self.content_stack.setCurrentIndex(8)
             self._update_search_placeholder("downloads", clear_text=True)
             self.downloads_view.refresh()
@@ -2554,24 +2580,29 @@ class MainWindow(QMainWindow):
         if target_idx == 4 and hasattr(self, "movie_details_view"):
             self.current_section = "vod"
             self._update_search_placeholder("vod", clear_text=True)
-            self.main_content_stack.setCurrentIndex(4)
+            if hasattr(self, "main_content_stack"):
+                self.main_content_stack.setCurrentIndex(4)
             self.movie_details_view.refresh_progress()
         elif target_idx == 3 and hasattr(self, "series_details_view"):
             self.current_section = "series"
             self._update_search_placeholder("series", clear_text=True)
-            self.main_content_stack.setCurrentIndex(3)
+            if hasattr(self, "main_content_stack"):
+                self.main_content_stack.setCurrentIndex(3)
             self.series_details_view.refresh_progress()
         elif target_idx == 2 and hasattr(self, "series_grid_view"):
             self.current_section = "series"
             self._update_search_placeholder("series", clear_text=True)
-            self.main_content_stack.setCurrentIndex(2)
+            if hasattr(self, "main_content_stack"):
+                self.main_content_stack.setCurrentIndex(2)
             self.series_grid_view.update_all_progress_bars()
-        else:
+        elif hasattr(self, "vod_grid_view"):
             self.current_section = "vod"
             self._update_search_placeholder("vod", clear_text=True)
-            self.main_content_stack.setCurrentIndex(1)
+            if hasattr(self, "main_content_stack"):
+                self.main_content_stack.setCurrentIndex(1)
             self.vod_grid_view.update_all_progress_bars()
-        self._apply_layout_geometry()
+        if hasattr(self, "_apply_layout_geometry"):
+            self._apply_layout_geometry()
 
     def _on_browse_section_requested(self, section_id: str):
         """Navigue directement vers la section sélectionnée depuis les carrousels Récents."""
@@ -3420,6 +3451,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._apply_layout_geometry)
 
     def _apply_layout_geometry(self, target_width: Optional[int] = None):
+        if not hasattr(self, "settings") or not hasattr(self, "sidebar") or not hasattr(self, "content_stack"):
+            return
         cat_w = max(160, self.settings.category_panel_width or 280)
         ch_w = max(200, self.settings.channel_list_width or 360)
         collapsed = self.settings.categories_collapsed

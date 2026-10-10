@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import os
 import unittest
 import tempfile
@@ -34,6 +34,8 @@ class TestRefreshPlaylistNoScreenChange(unittest.TestCase):
     def test_refresh_during_series_details_playback_does_not_change_screen(self):
         """Vérifie que rafraîchir la liste pendant la lecture d'une série dans sa fiche ne change pas d'écran."""
         win = MainWindow.__new__(MainWindow)
+        from PyQt6.QtWidgets import QMainWindow
+        QMainWindow.__init__(win)
         win.db = self.db
         win.settings = AppSettings()
         win.current_section = "series"

@@ -1028,7 +1028,7 @@ class PlayerControls(QWidget):
             self.badge_live.setStyleSheet("background-color: #6366f1; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;")
 
     def set_playing_state(self, state: str):
-        self.has_active_media = state in ("playing", "paused", "buffering", "error")
+        self.has_active_media = state in ("playing", "paused", "buffering", "error") or bool(self.current_channel)
         self.is_playing = (state == "playing")
         self.is_paused = (state == "paused")
         self.is_buffering = (state == "buffering")
@@ -1047,6 +1047,12 @@ class PlayerControls(QWidget):
             self.badge_live.setStyleSheet("background-color: #7f1d1d; color: #fca5a5; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; border: 1px solid #ef4444;")
             self.play_btn.setIcon(get_icon("play_arrow", color="#ffffff"))
             self.play_btn.setToolTip("Flux indisponible")
+        elif state == "stopped":
+            self.buffering_indicator.stop()
+            self.error_banner.hide()
+            self._update_channel_badge_type()
+            self.play_btn.setIcon(get_icon("replay", color="#ffffff"))
+            self.play_btn.setToolTip("Relancer la lecture (Espace ou clic vidéo)")
         else:
             self.buffering_indicator.stop()
             self.error_banner.hide()

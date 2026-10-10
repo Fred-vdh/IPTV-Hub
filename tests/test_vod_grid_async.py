@@ -131,22 +131,21 @@ class TestVODGridAsync(unittest.TestCase):
         QApplication.processEvents()
 
     def test_poster_widget_disconnects_image_loader(self):
-        """Vérifie que PosterWidget se déconnecte d'ImageLoader dès réception de son image."""
+        """Vérifie que PosterWidget enregistre et annule proprement sa cible auprès d'ImageLoader."""
         ch = Channel(name="Test Poster", logo_url="http://test.com/logo.png")
         pw = PosterWidget(ch)
         loader = ImageLoader.instance()
-        self.assertTrue(pw._is_connected_to_loader)
+        self.assertIn(id(pw), loader._target_urls)
 
-        # Émission d'une image pour un autre poster -> ne doit pas se déconnecter
+        # Assignation directe du pixmap
         pix = QPixmap(10, 10)
-        loader.image_loaded.emit("http://other.com/logo.png", pix)
-        self.assertTrue(pw._is_connected_to_loader)
-        self.assertIsNone(pw.pixmap)
-
-        # Émission de son image -> déconnexion immédiate et pixmap assigné
-        loader.image_loaded.emit("http://test.com/logo.png", pix)
-        self.assertFalse(pw._is_connected_to_loader)
+        pw._set_pixmap(pix)
         self.assertIsNotNone(pw.pixmap)
+
+        # Nettoyage -> la cible doit être retirée d'ImageLoader
+        pw.cleanup()
+        self.assertNotIn(id(pw), loader._target_urls)
+        self.assertIsNone(pw.pixmap)
 
     def test_sort_order_persists_across_categories(self):
         """Vérifie que l'ordre de tri choisi par l'utilisateur est conservé par catégorie."""
