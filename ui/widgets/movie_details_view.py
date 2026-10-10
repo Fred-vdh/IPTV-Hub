@@ -112,6 +112,7 @@ class MovieDetailsView(QWidget):
     play_trailer_requested = pyqtSignal(str, str)  # (title, trailer_url)
     progress_cleared = pyqtSignal(Channel)
     artist_clicked = pyqtSignal(str)
+    toggle_categories_requested = pyqtSignal()
 
     def __init__(self, db: Database, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -194,6 +195,28 @@ class MovieDetailsView(QWidget):
         """)
         self.back_btn.clicked.connect(self.back_clicked.emit)
         nav_row.addWidget(self.back_btn)
+
+        self.expand_cat_btn = QPushButton()
+        self.expand_cat_btn.setIcon(get_icon("chevron_right", color="#ffffff"))
+        self.expand_cat_btn.setIconSize(QSize(18, 18))
+        self.expand_cat_btn.setFixedSize(36, 36)
+        self.expand_cat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.expand_cat_btn.setToolTip(tr("Afficher les catégories"))
+        self.expand_cat_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(30, 41, 59, 0.85);
+                color: #ffffff;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 18px;
+            }
+            QPushButton:hover {
+                background-color: #3b82f6;
+                border-color: #3b82f6;
+            }
+        """)
+        self.expand_cat_btn.clicked.connect(self.toggle_categories_requested.emit)
+        self.expand_cat_btn.setVisible(False)
+        nav_row.addWidget(self.expand_cat_btn)
 
         self.nav_tag = QLabel(tr("FICHE DU FILM"))
         self.nav_tag.setCursor(Qt.CursorShape.ArrowCursor)
@@ -1364,5 +1387,12 @@ class MovieDetailsView(QWidget):
             self.open_youtube_btn.setText("  " + tr("Ouvrir sur YouTube"))
         if hasattr(self, "reviews_title"):
             self.reviews_title.setText(tr("Avis des spectateurs"))
+        if hasattr(self, "expand_cat_btn"):
+            self.expand_cat_btn.setToolTip(tr("Afficher les catégories"))
         self._update_fav_btn()
+
+    def set_categories_collapsed(self, collapsed: bool):
+        """Affiche ou masque le bouton pour redéployer le panneau des catégories."""
+        if hasattr(self, "expand_cat_btn"):
+            self.expand_cat_btn.setVisible(collapsed)
 

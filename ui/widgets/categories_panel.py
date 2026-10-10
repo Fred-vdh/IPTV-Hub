@@ -180,6 +180,7 @@ class CategoriesPanel(QFrame):
     manage_custom_lists_requested = pyqtSignal()
     custom_list_renamed = pyqtSignal(int, str)
     custom_list_deleted = pyqtSignal(int, str)
+    toggle_collapse_requested = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -252,6 +253,18 @@ class CategoriesPanel(QFrame):
         self.filter_btn.clicked.connect(self.manage_categories_requested.emit)
         header_row.addWidget(self.filter_btn)
 
+        # Bouton Réduire les catégories
+        self.collapse_btn = QPushButton()
+        self.collapse_btn.setIcon(get_icon("chevron_left", color=DEFAULT_ICON_COLOR))
+        self.collapse_btn.setIconSize(QSize(18, 18))
+        self.collapse_btn.setFixedSize(28, 28)
+        self.collapse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.collapse_btn.setToolTip(tr("Réduire les catégories"))
+        self.collapse_btn.setStyleSheet("background: transparent; border: none; border-radius: 4px;")
+        self.collapse_btn.clicked.connect(self.toggle_collapse_requested.emit)
+        self.collapse_btn.setVisible(False)
+        header_row.addWidget(self.collapse_btn)
+
         layout.addLayout(header_row)
 
         # 2. Barre de recherche (escamotable)
@@ -303,6 +316,8 @@ class CategoriesPanel(QFrame):
         Si ce n'est pas le direct, les listes personnalisées sont purgées immédiatement.
         """
         self.stream_type = stream_type
+        if hasattr(self, "collapse_btn"):
+            self.collapse_btn.setVisible(self.stream_type in ("movie", "series", "vod"))
         if self.stream_type != "live":
             self._custom_lists = []
             self._current_selected_custom_list_id = None
@@ -548,6 +563,8 @@ class CategoriesPanel(QFrame):
             self.sort_btn.setToolTip(tr("Trier les catégories"))
         if hasattr(self, "filter_btn"):
             self.filter_btn.setToolTip(tr("Gérer et filtrer les catégories"))
+        if hasattr(self, "collapse_btn"):
+            self.collapse_btn.setToolTip(tr("Réduire les catégories"))
         if hasattr(self, "search_edit"):
             self.search_edit.setPlaceholderText(tr("Filtrer les catégories..."))
         self._render_categories()

@@ -409,6 +409,12 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "es": "Ocultar categorías",
         "de": "Kategorien ausblenden",
     },
+    "Réduire les catégories": {
+        "fr": "Réduire les catégories",
+        "en": "Collapse categories",
+        "es": "Colapsar categorías",
+        "de": "Kategorien einklappen",
+    },
     "Toutes": {
         "fr": "Toutes",
         "en": "All",
