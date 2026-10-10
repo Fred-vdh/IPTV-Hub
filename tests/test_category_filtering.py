@@ -162,64 +162,6 @@ class TestCategoryFiltering(unittest.TestCase):
         dlg.deleteLater()
         dlg2.deleteLater()
 
-    def test_categories_collapse_button_in_movie_and_series(self):
-        from PyQt6.QtWidgets import QApplication
-        from ui.widgets.categories_panel import CategoriesPanel
-        from ui.widgets.vod_grid import VODGridView
-        from ui.widgets.movie_details_view import MovieDetailsView
-        from ui.widgets.series_details_view import SeriesDetailsView
-
-        _app = QApplication.instance() or QApplication([])
-
-        cat_panel = CategoriesPanel()
-        cat_panel.show()
-        # En mode 'live', le bouton de réduction des catégories doit être masqué
-        cat_panel.set_stream_type("live")
-        self.assertTrue(cat_panel.collapse_btn.isHidden())
-
-        # En mode 'movie', le bouton de réduction doit devenir visible
-        cat_panel.set_stream_type("movie")
-        self.assertFalse(cat_panel.collapse_btn.isHidden())
-
-        # En mode 'series', le bouton doit également être visible
-        cat_panel.set_stream_type("series")
-        self.assertFalse(cat_panel.collapse_btn.isHidden())
-
-        # Vérifier l'émission du signal toggle_collapse_requested
-        signal_emitted = []
-        cat_panel.toggle_collapse_requested.connect(lambda: signal_emitted.append(True))
-        cat_panel.collapse_btn.click()
-        self.assertEqual(len(signal_emitted), 1)
-
-        # Vérifier VODGridView pour le redéploiement des catégories
-        vod_grid = VODGridView(self.db, stream_type="movie")
-        self.assertTrue(vod_grid.expand_cat_btn.isHidden())
-        vod_grid.set_categories_collapsed(True)
-        self.assertFalse(vod_grid.expand_cat_btn.isHidden())
-        vod_grid.set_categories_collapsed(False)
-        self.assertTrue(vod_grid.expand_cat_btn.isHidden())
-
-        # Vérifier MovieDetailsView pour le redéploiement
-        movie_view = MovieDetailsView(self.db)
-        self.assertTrue(movie_view.expand_cat_btn.isHidden())
-        movie_view.set_categories_collapsed(True)
-        self.assertFalse(movie_view.expand_cat_btn.isHidden())
-        movie_view.set_categories_collapsed(False)
-        self.assertTrue(movie_view.expand_cat_btn.isHidden())
-
-        # Vérifier SeriesDetailsView pour le redéploiement
-        series_view = SeriesDetailsView(self.db)
-        self.assertTrue(series_view.expand_cat_btn.isHidden())
-        series_view.set_categories_collapsed(True)
-        self.assertFalse(series_view.expand_cat_btn.isHidden())
-        series_view.set_categories_collapsed(False)
-        self.assertTrue(series_view.expand_cat_btn.isHidden())
-
-        cat_panel.deleteLater()
-        vod_grid.deleteLater()
-        movie_view.deleteLater()
-        series_view.deleteLater()
-
 
 if __name__ == "__main__":
     unittest.main()

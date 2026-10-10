@@ -406,7 +406,6 @@ class VODGridView(QWidget):
     movie_details_requested = pyqtSignal(Channel)
     favorite_toggled = pyqtSignal(Channel)
     artist_search_requested = pyqtSignal(str, object)
-    toggle_categories_requested = pyqtSignal()
 
     INITIAL_BATCH_SIZE = 60  # Affichage immédiat des 60 premières affiches à l'ouverture
     BATCH_SIZE = 60          # Lots chargés de manière asynchrone lors du défilement
@@ -470,28 +469,6 @@ class VODGridView(QWidget):
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(12)
-
-        # Bouton Déployer les catégories (visible uniquement quand repliées)
-        self.expand_cat_btn = QPushButton()
-        self.expand_cat_btn.setIcon(get_icon("chevron_right", color="#94a3b8"))
-        self.expand_cat_btn.setIconSize(QSize(18, 18))
-        self.expand_cat_btn.setFixedSize(28, 28)
-        self.expand_cat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.expand_cat_btn.setToolTip(tr("Afficher les catégories"))
-        self.expand_cat_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 1px solid #334155;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #1e293b;
-                border-color: #475569;
-            }
-        """)
-        self.expand_cat_btn.clicked.connect(self.toggle_categories_requested.emit)
-        self.expand_cat_btn.setVisible(False)
-        top_layout.addWidget(self.expand_cat_btn)
 
         # 1.1 Gauche : Titre de catégorie & Compteur
         title_box = QVBoxLayout()
@@ -1236,11 +1213,4 @@ class VODGridView(QWidget):
         if hasattr(self, "artist_btn"):
             self.artist_btn.setText(" " + tr("Artiste"))
             self.artist_btn.setToolTip(tr("Rechercher un acteur ou réalisateur (expérimental)"))
-        if hasattr(self, "expand_cat_btn"):
-            self.expand_cat_btn.setToolTip(tr("Afficher les catégories"))
-
-    def set_categories_collapsed(self, collapsed: bool):
-        """Affiche ou masque le bouton pour redéployer le panneau des catégories."""
-        if hasattr(self, "expand_cat_btn"):
-            self.expand_cat_btn.setVisible(collapsed)
 

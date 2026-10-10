@@ -444,7 +444,6 @@ class MainWindow(QMainWindow):
         self.categories_panel.manage_custom_lists_requested.connect(self._open_manage_custom_lists_dialog)
         self.categories_panel.custom_list_renamed.connect(self._on_custom_list_renamed)
         self.categories_panel.custom_list_deleted.connect(self._on_custom_list_deleted)
-        self.categories_panel.toggle_collapse_requested.connect(self._toggle_categories_panel)
 
         # Liste des chaînes
         self.channel_panel.channel_selected.connect(self._on_channel_selected)
@@ -485,7 +484,6 @@ class MainWindow(QMainWindow):
         # Galerie VOD Films & Contrôles
         self.vod_grid_view.movie_selected.connect(self._on_vod_movie_selected)
         self.vod_grid_view.movie_details_requested.connect(self._open_movie_details)
-        self.vod_grid_view.toggle_categories_requested.connect(self._toggle_categories_panel)
         if hasattr(self.vod_grid_view, "artist_search_requested"):
             self.vod_grid_view.artist_search_requested.connect(self._show_artist_filmography)
         self.video_widget.controls.back_clicked.connect(self._return_to_vod_grid)
@@ -493,7 +491,6 @@ class MainWindow(QMainWindow):
         # Galerie Séries & Fiche Série Détaillée
         self.series_grid_view.movie_selected.connect(self._open_series_details)
         self.series_grid_view.movie_details_requested.connect(self._open_series_details)
-        self.series_grid_view.toggle_categories_requested.connect(self._toggle_categories_panel)
         if hasattr(self.series_grid_view, "artist_search_requested"):
             self.series_grid_view.artist_search_requested.connect(self._show_artist_filmography)
         self.series_details_view.back_clicked.connect(self._back_to_series_grid)
@@ -502,7 +499,6 @@ class MainWindow(QMainWindow):
         self.series_details_view.play_episode_requested.connect(self._on_series_play_episode_requested)
         self.series_details_view.play_trailer_requested.connect(lambda t, u: self._on_play_trailer_requested(t, u, "series"))
         self.series_details_view.artist_clicked.connect(self._show_artist_filmography)
-        self.series_details_view.toggle_categories_requested.connect(self._toggle_categories_panel)
 
         # Fiche Film VOD (vue intégrée)
         self.movie_details_view.back_clicked.connect(self._back_to_vod_grid_from_details)
@@ -510,7 +506,6 @@ class MainWindow(QMainWindow):
         self.movie_details_view.play_trailer_requested.connect(lambda t, u: self._on_play_trailer_requested(t, u, "movie"))
         self.movie_details_view.progress_cleared.connect(lambda _: (self.vod_grid_view.update_all_progress_bars(), self.dashboard_view.refresh_view()))
         self.movie_details_view.artist_clicked.connect(self._show_artist_filmography)
-        self.movie_details_view.toggle_categories_requested.connect(self._toggle_categories_panel)
 
         # Mémorisation du redimensionnement libre des panneaux
         self.splitter.splitterMoved.connect(self._on_splitter_moved)
@@ -3503,7 +3498,6 @@ class MainWindow(QMainWindow):
                 self.categories_panel.show()
                 details_w = max(200, total_w - cat_w)
                 self.splitter.setSizes([cat_w, 0, details_w])
-            self._update_categories_collapsed_ui(collapsed)
             self._update_details_video_geometry()
             return
 
@@ -3519,7 +3513,6 @@ class MainWindow(QMainWindow):
                 self.categories_panel.show()
                 vod_w = max(200, total_w - cat_w)
                 self.splitter.setSizes([cat_w, 0, vod_w])
-            self._update_categories_collapsed_ui(collapsed)
             return
 
         # 6. Live TV (section "live" ou mode chaîne en direct)
@@ -3536,7 +3529,6 @@ class MainWindow(QMainWindow):
             self.categories_panel.show()
             video_w = max(200, total_w - cat_w - ch_w)
             self.splitter.setSizes([cat_w, ch_w, video_w])
-        self._update_categories_collapsed_ui(collapsed)
         self._update_video_widget_geometry()
 
     def _update_details_video_geometry(self):
@@ -3628,19 +3620,6 @@ class MainWindow(QMainWindow):
         self._update_video_widget_geometry()
         self._update_details_video_geometry()
 
-    def _update_categories_collapsed_ui(self, collapsed: bool):
-        """Synchronise l'état replié/déployé sur les panneaux et vues concernés."""
-        if hasattr(self, "channel_panel"):
-            self.channel_panel.set_categories_collapsed(collapsed)
-        if hasattr(self, "vod_grid_view"):
-            self.vod_grid_view.set_categories_collapsed(collapsed)
-        if hasattr(self, "series_grid_view"):
-            self.series_grid_view.set_categories_collapsed(collapsed)
-        if hasattr(self, "movie_details_view"):
-            self.movie_details_view.set_categories_collapsed(collapsed)
-        if hasattr(self, "series_details_view"):
-            self.series_details_view.set_categories_collapsed(collapsed)
-
     def _toggle_categories_panel(self):
         is_visible = self.categories_panel.isVisible()
         cat_w = max(160, self.settings.category_panel_width or 280)
@@ -3649,17 +3628,12 @@ class MainWindow(QMainWindow):
         total_sizes = self.splitter.sizes()
         total_w = sum(total_sizes) if (total_sizes and sum(total_sizes) > 0) else (self.width() - (self.sidebar.width() or 56))
 
-        is_movie_or_series = (
-            self.current_section in ("vod", "series")
-            or (hasattr(self, "main_content_stack") and self.main_content_stack.currentIndex() in (1, 2, 3, 4))
-        )
-
         if is_visible:
             # On replie le panneau des catégories
             self.settings.categories_collapsed = True
             self.categories_panel.setVisible(False)
-            self._update_categories_collapsed_ui(True)
-            if is_movie_or_series:
+            self.channel_panel.set_categories_collapsed(True)
+            if self.current_section in ("vod", "series"):
                 self.splitter.setSizes([0, 0, max(200, total_w)])
             else:
                 video_w = max(200, total_w - ch_w)
@@ -3668,8 +3642,8 @@ class MainWindow(QMainWindow):
             # On redéploie le panneau des catégories
             self.settings.categories_collapsed = False
             self.categories_panel.setVisible(True)
-            self._update_categories_collapsed_ui(False)
-            if is_movie_or_series:
+            self.channel_panel.set_categories_collapsed(False)
+            if self.current_section in ("vod", "series"):
                 vod_w = max(200, total_w - cat_w)
                 self.splitter.setSizes([cat_w, 0, vod_w])
             else:
@@ -3681,8 +3655,6 @@ class MainWindow(QMainWindow):
             channel_w=ch_w,
             collapsed=self.settings.categories_collapsed
         )
-        self._update_video_widget_geometry()
-        self._update_details_video_geometry()
 
     def _release_video_render_contexts(self):
         """Libère le contexte de rendu OpenGL de la surface vidéo principale.
