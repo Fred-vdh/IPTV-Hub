@@ -283,6 +283,9 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
+        self._video_placeholder = QWidget()
+        self._video_placeholder.setStyleSheet("background-color: #0b0e14;")
+
         self.player_stack = QStackedWidget(self.right_container)
         self.player_stack.addWidget(self.video_widget)
 
@@ -1418,6 +1421,14 @@ class MainWindow(QMainWindow):
                 self.series_details_view.set_active_playing_episode(str(next_ep.stream_id))
     def activate_multiview(self):
         """Bascule le lecteur Live TV en mode Multiview (mosaïque multi-écrans)."""
+        # Garde-fou strict : impossible d'activer le Multiview si un film, une série ou un trailer joue dans les détails
+        if (
+            getattr(self, "_is_playing_series_in_details", False)
+            or getattr(self, "_is_playing_movie_in_details", False)
+            or getattr(self, "_is_playing_trailer", False)
+        ):
+            return
+
         if hasattr(self, "player_stack") and self.player_stack.currentIndex() == 1:
             return
 
@@ -1502,6 +1513,8 @@ class MainWindow(QMainWindow):
         ):
             return
         try:
+            if hasattr(self, "_video_placeholder") and self.player_stack.indexOf(self._video_placeholder) != -1:
+                self.player_stack.removeWidget(self._video_placeholder)
             if self.player_stack.indexOf(self.video_widget) == -1:
                 self.player_stack.insertWidget(0, self.video_widget)
             self.player_stack.setCurrentWidget(self.video_widget)
@@ -1999,14 +2012,24 @@ class MainWindow(QMainWindow):
         if self.current_section == "vod":
             if getattr(self, "_is_playing_movie_in_details", False):
                 self._stop_movie_details_playback()
+            if getattr(self, "_is_playing_trailer", False):
+                self._stop_trailer_playback()
             self.main_content_stack.setCurrentIndex(1)
             self.vod_grid_view.set_playlist_and_category(self.get_selected_playlist_id(), category_name)
         elif self.current_section == "series":
             if getattr(self, "_is_playing_series_in_details", False):
                 self._stop_series_details_playback()
+            if getattr(self, "_is_playing_trailer", False):
+                self._stop_trailer_playback()
             self.main_content_stack.setCurrentIndex(2)
             self.series_grid_view.set_playlist_and_category(self.get_selected_playlist_id(), category_name)
         else:
+            if getattr(self, "_is_playing_movie_in_details", False):
+                self._stop_movie_details_playback()
+            if getattr(self, "_is_playing_series_in_details", False):
+                self._stop_series_details_playback()
+            if getattr(self, "_is_playing_trailer", False):
+                self._stop_trailer_playback()
             self.channel_panel.show()
             self.main_content_stack.setCurrentIndex(0)
             self.channel_panel.set_category(category_name)
@@ -2173,6 +2196,9 @@ class MainWindow(QMainWindow):
 
             # Détacher le lecteur vidéo de son conteneur (player_stack) et l'attacher à la fiche série
             self.player_stack.removeWidget(self.video_widget)
+            if hasattr(self, "_video_placeholder") and self.player_stack.indexOf(self._video_placeholder) == -1:
+                self.player_stack.insertWidget(0, self._video_placeholder)
+                self.player_stack.setCurrentWidget(self._video_placeholder)
             self.series_details_view.attach_video_widget(self.video_widget)
 
         self._play_series_episode_in_details(channel, start_pos=start_pos)
@@ -2377,6 +2403,9 @@ class MainWindow(QMainWindow):
 
         # Détacher le lecteur vidéo de son conteneur (player_stack) et l'attacher à la fiche film
         self.player_stack.removeWidget(self.video_widget)
+        if hasattr(self, "_video_placeholder") and self.player_stack.indexOf(self._video_placeholder) == -1:
+            self.player_stack.insertWidget(0, self._video_placeholder)
+            self.player_stack.setCurrentWidget(self._video_placeholder)
         self.movie_details_view.attach_video_widget(self.video_widget)
 
         # Mettre à jour l'OSD complet
@@ -2473,6 +2502,9 @@ class MainWindow(QMainWindow):
         self._apply_layout_geometry()
 
         self.player_stack.removeWidget(self.video_widget)
+        if hasattr(self, "_video_placeholder") and self.player_stack.indexOf(self._video_placeholder) == -1:
+            self.player_stack.insertWidget(0, self._video_placeholder)
+            self.player_stack.setCurrentWidget(self._video_placeholder)
         target_view.attach_video_widget(self.video_widget)
 
         self.video_widget.controls.update_channel_info(trailer_channel)
@@ -2701,6 +2733,12 @@ class MainWindow(QMainWindow):
 
     def _on_custom_list_selected(self, list_id: int, list_name: str):
         """Affiche les chaînes d'une liste de chaînes personnalisée dans ChannelListPanel."""
+        if getattr(self, "_is_playing_movie_in_details", False):
+            self._stop_movie_details_playback()
+        if getattr(self, "_is_playing_series_in_details", False):
+            self._stop_series_details_playback()
+        if getattr(self, "_is_playing_trailer", False):
+            self._stop_trailer_playback()
         self.channel_panel.show()
         self.main_content_stack.setCurrentIndex(0)
         self.channel_panel.set_custom_list(list_id, list_name)
