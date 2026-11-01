@@ -175,6 +175,47 @@ class TestVODGridAsync(unittest.TestCase):
 
         view.stop_workers()
 
+    def test_search_clearing_and_category_switch(self):
+        """Vérifie que la recherche se réinitialise lors d'un changement de catégorie et via clear_search."""
+        view = VODGridView(self.db, stream_type="movie")
+        view.set_playlist_and_category(self.pl_id, "Action")
+        QApplication.processEvents()
+
+        # Simuler une recherche sans résultat
+        view.search_query = "Introuvable999"
+        view.refresh()
+        QApplication.processEvents()
+
+        self.assertEqual(view.total_items, 0)
+        self.assertFalse(view.clear_search_btn.isHidden())
+
+        # Test de clear_search()
+        cleared_emitted = []
+        view.search_cleared.connect(lambda: cleared_emitted.append(True))
+        view.clear_search()
+        QApplication.processEvents()
+
+        self.assertEqual(len(cleared_emitted), 1)
+        self.assertEqual(view.search_query, "")
+        self.assertTrue(view.clear_search_btn.isHidden())
+        self.assertEqual(view.total_items, 120)
+
+        # Simuler à nouveau une recherche, puis sélection d'une catégorie
+        view.search_query = "Introuvable999"
+        view.refresh()
+        QApplication.processEvents()
+        self.assertEqual(view.total_items, 0)
+
+        # set_playlist_and_category réinitialise la recherche par défaut
+        view.set_playlist_and_category(self.pl_id, "Action", reset_search=True)
+        QApplication.processEvents()
+        self.assertEqual(view.search_query, "")
+        self.assertTrue(view.clear_search_btn.isHidden())
+        self.assertEqual(view.total_items, 120)
+
+        view.stop_workers()
+
 
 if __name__ == "__main__":
     unittest.main()
+

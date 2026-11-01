@@ -406,6 +406,7 @@ class VODGridView(QWidget):
     movie_details_requested = pyqtSignal(Channel)
     favorite_toggled = pyqtSignal(Channel)
     artist_search_requested = pyqtSignal(str, object)
+    search_cleared = pyqtSignal()
 
     INITIAL_BATCH_SIZE = 60  # Affichage immédiat des 60 premières affiches à l'ouverture
     BATCH_SIZE = 60          # Lots chargés de manière asynchrone lors du défilement
@@ -485,6 +486,28 @@ class VODGridView(QWidget):
         title_box.addWidget(self.items_count_label)
 
         top_layout.addLayout(title_box)
+
+        # Bouton d'annulation rapide de recherche dans la barre supérieure
+        self.clear_search_btn = QPushButton("✕ " + tr("Effacer la recherche"))
+        self.clear_search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_search_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ef4444;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #dc2626;
+            }
+        """)
+        self.clear_search_btn.clicked.connect(self.clear_search)
+        self.clear_search_btn.hide()
+        top_layout.addWidget(self.clear_search_btn)
+
         top_layout.addStretch()
 
         # 1.2 Droite : Tri & Bouton Refine
@@ -665,10 +688,21 @@ class VODGridView(QWidget):
 
         root_layout.addWidget(self.scroll_area)
 
-    def set_playlist_and_category(self, playlist_id: Optional[int], category_name: str = ""):
+    def set_playlist_and_category(self, playlist_id: Optional[int], category_name: str = "", reset_search: bool = True):
         self.current_playlist_id = playlist_id
         default_cat = "Toutes les séries" if self.stream_type == "series" else "Tous les films"
         self.current_category = category_name or default_cat
+
+        if reset_search and (self.search_query or getattr(self, "_pending_query", "")):
+            self.search_query = ""
+            self._pending_query = ""
+            if hasattr(self, "_search_timer"):
+                self._search_timer.stop()
+            if EXPERIMENTAL_ARTIST_SEARCH and hasattr(self, "artist_banner"):
+                self.artist_banner.hide()
+            if hasattr(self, "clear_search_btn"):
+                self.clear_search_btn.hide()
+            self.search_cleared.emit()
 
         cat_display = clean_category_display_name(self.current_category).upper()
         if cat_display in ("TOUTES LES CHAÎNES", "TOUS LES GROUPES", "TOUS LES FILMS", "TOUTES LES SÉRIES", "TOUTES LES SERIES"):
@@ -704,6 +738,21 @@ class VODGridView(QWidget):
         self.sort_combo.blockSignals(False)
 
         self.refresh()
+
+    def clear_search(self):
+        """Efface le terme de recherche et rétablit l'affichage normal du catalogue."""
+        has_query = bool(self.search_query or getattr(self, "_pending_query", ""))
+        self.search_query = ""
+        self._pending_query = ""
+        if hasattr(self, "_search_timer"):
+            self._search_timer.stop()
+        if EXPERIMENTAL_ARTIST_SEARCH and hasattr(self, "artist_banner"):
+            self.artist_banner.hide()
+        if hasattr(self, "clear_search_btn"):
+            self.clear_search_btn.hide()
+        if has_query:
+            self.search_cleared.emit()
+            self.refresh()
 
     def set_search_query(self, query: str):
         self._pending_query = query.strip()
@@ -842,6 +891,12 @@ class VODGridView(QWidget):
             count_word = item_singular if is_singular else item_plural
             self.items_count_label.setText(f"{formatted_total} {count_word}")
 
+        if hasattr(self, "clear_search_btn"):
+            if is_global_search:
+                self.clear_search_btn.show()
+            else:
+                self.clear_search_btn.hide()
+
         # Nettoyage ultra-rapide de la grille sans saccade ni fuite mémoire
         self.grid_container.setUpdatesEnabled(False)
         try:
@@ -859,49 +914,78 @@ class VODGridView(QWidget):
         self.scroll_area.verticalScrollBar().setValue(0)
 
         if self.total_items == 0:
-            if is_global_search and EXPERIMENTAL_ARTIST_SEARCH:
-                empty_box = QWidget()
-                empty_vbox = QVBoxLayout(empty_box)
-                empty_vbox.setSpacing(14)
-                empty_vbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_box = QWidget()
+            empty_vbox = QVBoxLayout(empty_box)
+            empty_vbox.setSpacing(16)
+            empty_vbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+            if is_global_search:
                 msg_lbl = QLabel(f'Aucun titre de {item_singular} ne correspond à "{self.search_query}".')
                 msg_lbl.setStyleSheet("color: #94a3b8; font-size: 14px; font-weight: 500;")
                 msg_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 empty_vbox.addWidget(msg_lbl)
 
-                btn_find_artist = QPushButton(f' Rechercher "{self.search_query.strip()}" parmi les artistes')
-                btn_find_artist.setIcon(get_icon("person", color="#ffffff"))
-                btn_find_artist.setIconSize(QSize(16, 16))
-                btn_find_artist.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn_find_artist.setStyleSheet("""
+                btn_row = QHBoxLayout()
+                btn_row.setSpacing(12)
+                btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                if EXPERIMENTAL_ARTIST_SEARCH:
+                    btn_find_artist = QPushButton(f' Rechercher "{self.search_query.strip()}" parmi les artistes')
+                    btn_find_artist.setIcon(get_icon("person", color="#ffffff"))
+                    btn_find_artist.setIconSize(QSize(16, 16))
+                    btn_find_artist.setCursor(Qt.CursorShape.PointingHandCursor)
+                    btn_find_artist.setStyleSheet("""
+                        QPushButton {
+                            background-color: #2563eb;
+                            color: #ffffff;
+                            border: none;
+                            border-radius: 8px;
+                            padding: 10px 20px;
+                            font-size: 13px;
+                            font-weight: 600;
+                        }
+                        QPushButton:hover {
+                            background-color: #3b82f6;
+                        }
+                    """)
+                    btn_find_artist.clicked.connect(self._on_banner_artist_clicked)
+                    btn_row.addWidget(btn_find_artist)
+
+                btn_clear = QPushButton("✕  " + tr("Effacer la recherche / Tout afficher"))
+                btn_clear.setIcon(get_icon("close", color="#ffffff"))
+                btn_clear.setIconSize(QSize(14, 14))
+                btn_clear.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_clear.setStyleSheet("""
                     QPushButton {
-                        background-color: #2563eb;
+                        background-color: #334155;
                         color: #ffffff;
-                        border: none;
+                        border: 1px solid #475569;
                         border-radius: 8px;
                         padding: 10px 20px;
                         font-size: 13px;
                         font-weight: 600;
                     }
                     QPushButton:hover {
-                        background-color: #3b82f6;
+                        background-color: #475569;
+                        border-color: #64748b;
                     }
                 """)
-                btn_find_artist.clicked.connect(self._on_banner_artist_clicked)
-                empty_vbox.addWidget(btn_find_artist, alignment=Qt.AlignmentFlag.AlignCenter)
+                btn_clear.clicked.connect(self.clear_search)
+                btn_row.addWidget(btn_clear)
 
+                empty_vbox.addLayout(btn_row)
                 self.grid_layout.addWidget(empty_box, 0, 0, 1, 4, Qt.AlignmentFlag.AlignCenter)
             else:
-                msg = f'Aucune {item_singular} trouvée pour "{self.search_query}".' if is_global_search else f"Aucune {item_singular} trouvée dans cette catégorie."
+                msg = f"Aucune {item_singular} trouvée dans cette catégorie."
                 empty_lbl = QLabel(msg)
                 empty_lbl.setStyleSheet("color: #64748b; font-size: 14px; font-weight: 500; margin-top: 40px;")
                 empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.grid_layout.addWidget(empty_lbl, 0, 0, 1, 4, Qt.AlignmentFlag.AlignCenter)
+                empty_vbox.addWidget(empty_lbl)
+                self.grid_layout.addWidget(empty_box, 0, 0, 1, 4, Qt.AlignmentFlag.AlignCenter)
             return
 
         # Chargement et affichage IMMÉDIAT des premières affiches (synchrone SQLite ultra-rapide)
-        max_loadable = 40 if is_global_search else self.total_items
+        max_loadable = min(40, self.total_items) if is_global_search else self.total_items
         first_limit = min(self.INITIAL_BATCH_SIZE, max_loadable)
         first_movies = []
         if first_limit > 0:
@@ -940,7 +1024,7 @@ class VODGridView(QWidget):
     def _load_next_batch(self):
         """Lance une requête asynchrone en arrière-plan sans bloquer le thread GUI."""
         is_global_search = len(self.search_query) >= 3
-        max_loadable = 40 if is_global_search else self.total_items
+        max_loadable = min(40, self.total_items) if is_global_search else self.total_items
         offset = self.loaded_count + len(self._pending_cards_queue)
 
         if self.is_loading or offset >= max_loadable:
@@ -1035,7 +1119,7 @@ class VODGridView(QWidget):
     def _check_prefetch(self):
         """Vérifie si un pré-chargement asynchrone du lot suivant doit être anticipé lors du défilement."""
         is_global_search = len(self.search_query) >= 3
-        max_loadable = 40 if is_global_search else self.total_items
+        max_loadable = min(40, self.total_items) if is_global_search else self.total_items
         total_in_flight = self.loaded_count + len(self._pending_cards_queue)
         if total_in_flight >= max_loadable:
             return
@@ -1213,4 +1297,6 @@ class VODGridView(QWidget):
         if hasattr(self, "artist_btn"):
             self.artist_btn.setText(" " + tr("Artiste"))
             self.artist_btn.setToolTip(tr("Rechercher un acteur ou réalisateur (expérimental)"))
+        if hasattr(self, "clear_search_btn"):
+            self.clear_search_btn.setText("✕ " + tr("Effacer la recherche"))
 

@@ -113,6 +113,7 @@ class MainWindow(QMainWindow):
         prewarm_pixmap_cache()
 
         self.video_widget = MPVVideoWidget(parent=self)
+        self.video_widget.set_osd_hover_mode(getattr(self.settings, "osd_hover_mode", True))
 
         # Rendu vidéo via l'API OpenGL de libmpv (mpv_render_context) dans le
         # QOpenGLWidget interne : plus de fenêtre native séparée, l'OSD Qt
@@ -170,7 +171,8 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
 
         self._update_search_placeholder(self.current_section)
-        self._load_initial_data()
+        # Chargement différé des données dès l'apparition de la fenêtre pour un affichage instantané
+        QTimer.singleShot(10, self._load_initial_data)
 
         # Restauration de l'état plein écran ou maximisé
         self._startup_fs_timer: Optional[QTimer] = None
@@ -489,6 +491,8 @@ class MainWindow(QMainWindow):
         self.vod_grid_view.movie_details_requested.connect(self._open_movie_details)
         if hasattr(self.vod_grid_view, "artist_search_requested"):
             self.vod_grid_view.artist_search_requested.connect(self._show_artist_filmography)
+        if hasattr(self.vod_grid_view, "search_cleared"):
+            self.vod_grid_view.search_cleared.connect(self._on_grid_search_cleared)
         self.video_widget.controls.back_clicked.connect(self._return_to_vod_grid)
 
         # Galerie Séries & Fiche Série Détaillée
@@ -496,6 +500,8 @@ class MainWindow(QMainWindow):
         self.series_grid_view.movie_details_requested.connect(self._open_series_details)
         if hasattr(self.series_grid_view, "artist_search_requested"):
             self.series_grid_view.artist_search_requested.connect(self._show_artist_filmography)
+        if hasattr(self.series_grid_view, "search_cleared"):
+            self.series_grid_view.search_cleared.connect(self._on_grid_search_cleared)
         self.series_details_view.back_clicked.connect(self._back_to_series_grid)
         self.series_details_view.fullscreen_requested.connect(self.toggle_fullscreen)
         self.series_details_view.favorite_toggled.connect(self._on_series_favorite_toggled)
@@ -1207,6 +1213,21 @@ class MainWindow(QMainWindow):
         self._save_current_playback_progress()
         self.current_channel = channel
 
+        # Si le lecteur vidéo était attaché à une fiche (film/série) ou bande-annonce,
+        # le détacher proprement et le réintégrer dans player_stack avant d'afficher la vue principale
+        if getattr(self, "_is_playing_movie_in_details", False):
+            self._is_playing_movie_in_details = False
+            if hasattr(self, "movie_details_view"):
+                self.movie_details_view.detach_video_widget(self.video_widget)
+            self._reattach_video_widget()
+        if getattr(self, "_is_playing_series_in_details", False):
+            self._is_playing_series_in_details = False
+            if hasattr(self, "series_details_view"):
+                self.series_details_view.detach_video_widget(self.video_widget)
+            self._reattach_video_widget()
+        if getattr(self, "_is_playing_trailer", False):
+            self._stop_trailer_playback()
+
         # S'assurer que le conteneur principal du lecteur est visible
         self.content_stack.setCurrentIndex(0)
         self.main_content_stack.setCurrentIndex(0)
@@ -1337,9 +1358,20 @@ class MainWindow(QMainWindow):
             else:
                 self._save_current_playback_progress()
 
-            # 2. Déterminer l'épisode suivant
-            if self._series_episodes and 0 <= self._current_series_idx < len(self._series_episodes) - 1:
-                self._current_series_idx += 1
+            # 2. Déterminer l'épisode suivant avec resynchronisation robuste
+            curr_idx = self._current_series_idx
+            if self._series_episodes and self.current_channel:
+                curr_id = str(getattr(self.current_channel, "stream_id", "") or "")
+                curr_url = getattr(self.current_channel, "stream_url", "") or ""
+                for i, ep in enumerate(self._series_episodes):
+                    ep_id = str(getattr(ep, "stream_id", "") or "")
+                    ep_url = getattr(ep, "stream_url", "") or ""
+                    if (curr_id and ep_id == curr_id) or (curr_url and ep_url == curr_url):
+                        curr_idx = i
+                        break
+
+            if self._series_episodes and 0 <= curr_idx < len(self._series_episodes) - 1:
+                self._current_series_idx = curr_idx + 1
                 next_ep = self._series_episodes[self._current_series_idx]
             elif self._series_episodes and len(self._series_episodes) > 0:
                 self._current_series_idx = 0
@@ -1388,12 +1420,27 @@ class MainWindow(QMainWindow):
         Retourne True si un épisode suivant a été trouvé et lancé, False sinon.
         """
         self._stopped_at_episode_end = False
-        next_ep = None
-        if self._series_episodes and 0 <= self._current_series_idx < len(self._series_episodes) - 1:
-            self._current_series_idx += 1
-            next_ep = self._series_episodes[self._current_series_idx]
+        if not self._series_episodes:
+            if hasattr(self, "series_details_view"):
+                self.series_details_view.refresh_progress()
+            return False
 
-        if not next_ep:
+        # Resynchronisation robuste de l'index avec l'épisode actuellement joué
+        curr_idx = self._current_series_idx
+        if self.current_channel:
+            curr_id = str(getattr(self.current_channel, "stream_id", "") or "")
+            curr_url = getattr(self.current_channel, "stream_url", "") or ""
+            for i, ep in enumerate(self._series_episodes):
+                ep_id = str(getattr(ep, "stream_id", "") or "")
+                ep_url = getattr(ep, "stream_url", "") or ""
+                if (curr_id and ep_id == curr_id) or (curr_url and ep_url == curr_url):
+                    curr_idx = i
+                    break
+
+        if 0 <= curr_idx < len(self._series_episodes) - 1:
+            self._current_series_idx = curr_idx + 1
+            next_ep = self._series_episodes[self._current_series_idx]
+        else:
             # Dernier épisode de la série : on ne fait rien, la lecture s'arrête.
             if hasattr(self, "series_details_view"):
                 self.series_details_view.refresh_progress()
@@ -1419,6 +1466,7 @@ class MainWindow(QMainWindow):
             self.play_channel(next_ep, start_time=0.0)
             if hasattr(self, "series_details_view") and getattr(next_ep, "stream_id", None):
                 self.series_details_view.set_active_playing_episode(str(next_ep.stream_id))
+        return True
     def activate_multiview(self):
         """Bascule le lecteur Live TV en mode Multiview (mosaïque multi-écrans)."""
         # Garde-fou strict : impossible d'activer le Multiview si un film, une série ou un trailer joue dans les détails
@@ -1539,7 +1587,26 @@ class MainWindow(QMainWindow):
 
     def _on_play_pause_requested(self):
         """Gestion centralisée de la commande Play/Pause (Bouton OSD ou barre d'espace)."""
-        if getattr(self, "_stopped_at_episode_end", False):
+        ctrl = getattr(self, "player_controller", None)
+        ctrl_state = (getattr(ctrl, "state", None) or getattr(ctrl, "_current_state", None)) if ctrl else None
+
+        # Si un film est en cours de lecture dans sa fiche détaillée, bascule strictement pause/reprise
+        if getattr(self, "_is_playing_movie_in_details", False):
+            self._stopped_at_episode_end = False
+            if self.player_controller:
+                self.player_controller.toggle_pause()
+            return
+
+        # Si un média est actuellement actif (en lecture, en pause ou en chargement),
+        # le clic / Espace doit STRICTEMENT basculer Pause/Reprise, JAMAIS changer d'épisode !
+        if ctrl_state in ("playing", "paused", "buffering") and self.current_channel:
+            self._stopped_at_episode_end = False
+            self.player_controller.toggle_pause()
+            return
+
+        # Si et seulement si la lecture est réellement arrêtée en fin d'épisode de SÉRIE
+        is_series = bool(self.current_channel and getattr(self.current_channel, "stream_type", "") == "series")
+        if getattr(self, "_stopped_at_episode_end", False) and is_series:
             if getattr(self.settings, "auto_play_next_episode", True):
                 if self._play_next_series_episode():
                     return
@@ -1551,7 +1618,10 @@ class MainWindow(QMainWindow):
                 else:
                     self.play_channel(self.current_channel, start_time=0.0)
                 return
-        self.player_controller.toggle_pause()
+
+        self._stopped_at_episode_end = False
+        if self.player_controller:
+            self.player_controller.toggle_pause()
 
     def _on_playback_finished(self):
         """Appelé quand un média à durée finie atteint sa fin (fin de fichier).
@@ -1575,10 +1645,13 @@ class MainWindow(QMainWindow):
         # Sécurité critique : vérifier que l'on est RÉELLEMENT à la fin du fichier vidéo
         # avant de marquer à 100% et d'enchaîner ou de revenir sur la fiche. Un arrêt prématuré,
         # un EOF MPV prématuré ou une coupure réseau ne doit JAMAIS marquer un média non terminé comme lu.
+        outro_start = getattr(self, "_current_outro_start_sec", None)
+        is_outro_reached = bool(outro_start is not None and outro_start > 0 and pos >= outro_start - 2.0)
         is_truly_at_end = (
-            dur > 60 and (
-                pos >= dur * 0.85
-                or (dur >= 180 and pos >= 120 and (dur - pos) <= 60)
+            dur > 30 and (
+                (dur - pos) <= 15
+                or pos >= dur * 0.98
+                or is_outro_reached
             )
         )
         if not is_truly_at_end:
@@ -1639,8 +1712,20 @@ class MainWindow(QMainWindow):
             # Sauvegarder la position de l'épisode actuel qu'on quitte
             self._save_current_playback_progress()
 
-            if self._series_episodes and self._current_series_idx > 0:
-                self._current_series_idx -= 1
+            # Resynchronisation robuste de l'index avec l'épisode actuellement joué
+            curr_idx = self._current_series_idx
+            if self._series_episodes and self.current_channel:
+                curr_id = str(getattr(self.current_channel, "stream_id", "") or "")
+                curr_url = getattr(self.current_channel, "stream_url", "") or ""
+                for i, ep in enumerate(self._series_episodes):
+                    ep_id = str(getattr(ep, "stream_id", "") or "")
+                    ep_url = getattr(ep, "stream_url", "") or ""
+                    if (curr_id and ep_id == curr_id) or (curr_url and ep_url == curr_url):
+                        curr_idx = i
+                        break
+
+            if self._series_episodes and curr_idx > 0:
+                self._current_series_idx = curr_idx - 1
                 prev_ep = self._series_episodes[self._current_series_idx]
             elif self._series_episodes and len(self._series_episodes) > 0:
                 self._current_series_idx = len(self._series_episodes) - 1
@@ -1700,6 +1785,8 @@ class MainWindow(QMainWindow):
             self._exit_fullscreen()
 
         self._details_origin_section = None
+        self._details_origin_search = ""
+        self._details_origin_category = ""
 
         if getattr(self, "_is_playing_movie_in_details", False):
             self._stop_movie_details_playback()
@@ -1721,6 +1808,17 @@ class MainWindow(QMainWindow):
         # Rebascule sur le lecteur si on était dans les paramètres ou favoris
         self.current_section = section_id
         self._update_search_placeholder(section_id, clear_text=True)
+
+        # Nettoyage systématique des recherches résiduelles sur les grilles lorsque le champ est vide
+        tb = getattr(self, "title_bar", None)
+        is_search_empty = not (tb and hasattr(tb, "search_box") and tb.search_box.text().strip())
+        if is_search_empty:
+            if hasattr(self, "vod_grid_view") and getattr(self.vod_grid_view, "search_query", ""):
+                self.vod_grid_view.clear_search()
+            if hasattr(self, "series_grid_view") and getattr(self.series_grid_view, "search_query", ""):
+                self.series_grid_view.clear_search()
+            if hasattr(self, "channel_panel") and getattr(self.channel_panel, "search_query", ""):
+                self.channel_panel.set_search_query("")
 
         pl_id = self.get_selected_playlist_id()
 
@@ -1976,6 +2074,14 @@ class MainWindow(QMainWindow):
             if cp:
                 cp.set_search_query(query)
 
+    def _on_grid_search_cleared(self):
+        """Réaction lorsque la recherche est effacée depuis une vue galerie VOD ou Séries."""
+        tb = getattr(self, "title_bar", None)
+        if tb and hasattr(tb, "search_box") and tb.search_box.text():
+            tb.search_box.blockSignals(True)
+            tb.search_box.clear()
+            tb.search_box.blockSignals(False)
+
     def _on_play_replay_requested(self, channel: Channel, program_title: str, stream_url: str, duration_sec: float):
         """Lance la lecture d'une émission en Replay/Timeshift avec contrôles de lecture complets."""
         self.current_section = "replay"
@@ -2009,20 +2115,30 @@ class MainWindow(QMainWindow):
         self.play_channel(channel, start_time=start_time)
 
     def _on_category_selected(self, category_name: str):
+        # La sélection d'une catégorie dans le panneau de gauche indique la volonté explicite
+        # de parcourir cette catégorie : on efface la barre de recherche
+        self._details_origin_search = ""
+        self._details_origin_category = ""
+        tb = getattr(self, "title_bar", None)
+        if tb and hasattr(tb, "search_box") and tb.search_box.text():
+            tb.search_box.blockSignals(True)
+            tb.search_box.clear()
+            tb.search_box.blockSignals(False)
+
         if self.current_section == "vod":
             if getattr(self, "_is_playing_movie_in_details", False):
                 self._stop_movie_details_playback()
             if getattr(self, "_is_playing_trailer", False):
                 self._stop_trailer_playback()
             self.main_content_stack.setCurrentIndex(1)
-            self.vod_grid_view.set_playlist_and_category(self.get_selected_playlist_id(), category_name)
+            self.vod_grid_view.set_playlist_and_category(self.get_selected_playlist_id(), category_name, reset_search=True)
         elif self.current_section == "series":
             if getattr(self, "_is_playing_series_in_details", False):
                 self._stop_series_details_playback()
             if getattr(self, "_is_playing_trailer", False):
                 self._stop_trailer_playback()
             self.main_content_stack.setCurrentIndex(2)
-            self.series_grid_view.set_playlist_and_category(self.get_selected_playlist_id(), category_name)
+            self.series_grid_view.set_playlist_and_category(self.get_selected_playlist_id(), category_name, reset_search=True)
         else:
             if getattr(self, "_is_playing_movie_in_details", False):
                 self._stop_movie_details_playback()
@@ -2043,13 +2159,20 @@ class MainWindow(QMainWindow):
         if getattr(self, "_is_playing_movie_in_details", False):
             self._stop_movie_details_playback()
 
-        # Mémoriser la section d'origine avant ouverture de la fiche
-        self._details_origin_section = self.current_section
+        # Mémoriser la section d'origine et la recherche active avant ouverture de la fiche
+        if not getattr(self, "_details_origin_section", None):
+            self._details_origin_section = self.current_section
+            tb = getattr(self, "title_bar", None)
+            origin_search = tb.search_box.text().strip() if (tb and hasattr(tb, "search_box")) else ""
+            self._details_origin_search = origin_search
+            self._details_origin_category = getattr(self.categories_panel, "_current_selected_cat", "")
+        else:
+            origin_search = getattr(self, "_details_origin_search", "")
 
         self.current_section = "series"
         if hasattr(self, "sidebar"):
             self.sidebar.set_active_section("series")
-        self._update_search_placeholder("series", clear_text=True)
+        self._update_search_placeholder("series", clear_text=False)
         self.content_stack.setCurrentIndex(0)
         self.main_content_stack.setCurrentIndex(3)
 
@@ -2087,11 +2210,12 @@ class MainWindow(QMainWindow):
             self.categories_panel.set_stream_type("series")
             self.categories_panel.set_title("Catégories Séries")
             self.categories_panel.set_custom_lists([])
-            self.categories_panel.set_categories(cat_list, default_selected=cat_to_select)
+            default_cat = (self._details_origin_category if origin_search and self._details_origin_category in cat_list else cat_to_select)
+            self.categories_panel.set_categories(cat_list, default_selected=default_cat)
         else:
             self.categories_panel.set_stream_type("series")
             self.categories_panel.set_custom_lists([])
-            if channel.group_title:
+            if channel.group_title and not origin_search:
                 self.categories_panel.select_category(channel.group_title, emit_signal=False)
 
         self.categories_panel.show()
@@ -2116,7 +2240,11 @@ class MainWindow(QMainWindow):
         self.series_details_view.close_player()
 
         origin = getattr(self, "_details_origin_section", None) or "series"
+        origin_search = getattr(self, "_details_origin_search", "")
+        origin_cat = getattr(self, "_details_origin_category", "")
         self._details_origin_section = None
+        self._details_origin_search = ""
+        self._details_origin_category = ""
 
         if origin == "dashboard":
             self.current_section = "dashboard"
@@ -2151,10 +2279,24 @@ class MainWindow(QMainWindow):
                 self.categories_panel.show()
             self.channel_panel.hide()
             self.main_content_stack.setCurrentIndex(2)
-            target_cat = getattr(self.categories_panel, "_current_selected_cat", "") or "Toutes les séries"
+
             pl_id = self.get_selected_playlist_id()
-            if self.series_grid_view.current_playlist_id != pl_id or self.series_grid_view.current_category != target_cat:
-                self.series_grid_view.set_playlist_and_category(pl_id, target_cat)
+            if origin_search:
+                if origin_cat:
+                    self.categories_panel.select_category(origin_cat, emit_signal=False)
+                tb = getattr(self, "title_bar", None)
+                if tb and hasattr(tb, "search_box") and tb.search_box.text() != origin_search:
+                    tb.search_box.blockSignals(True)
+                    tb.search_box.setText(origin_search)
+                    tb.search_box.blockSignals(False)
+                if self.series_grid_view.search_query != origin_search:
+                    self.series_grid_view.set_search_query(origin_search)
+                    if hasattr(self.series_grid_view, "_apply_search"):
+                        self.series_grid_view._apply_search()
+            else:
+                target_cat = origin_cat or getattr(self.categories_panel, "_current_selected_cat", "") or "Toutes les séries"
+                if self.series_grid_view.current_playlist_id != pl_id or self.series_grid_view.current_category != target_cat:
+                    self.series_grid_view.set_playlist_and_category(pl_id, target_cat)
             self.series_grid_view.update_all_progress_bars()
         else:
             self.current_section = origin
@@ -2162,12 +2304,12 @@ class MainWindow(QMainWindow):
                 self.sidebar.set_active_section(origin)
             self.content_stack.setCurrentIndex(0)
             self.main_content_stack.setCurrentIndex(2)
-            target_cat = getattr(self.categories_panel, "_current_selected_cat", "") or "Toutes les séries"
+            target_cat = origin_cat or getattr(self.categories_panel, "_current_selected_cat", "") or "Toutes les séries"
             pl_id = self.get_selected_playlist_id()
             if self.series_grid_view.current_playlist_id != pl_id or self.series_grid_view.current_category != target_cat:
                 self.series_grid_view.set_playlist_and_category(pl_id, target_cat)
             self.series_grid_view.update_all_progress_bars()
-        self._update_search_placeholder(self.current_section, clear_text=True)
+        self._update_search_placeholder(self.current_section, clear_text=not bool(origin_search))
         self._apply_layout_geometry()
 
     def _on_series_favorite_toggled(self, channel: Channel, is_fav: bool):
@@ -2275,13 +2417,20 @@ class MainWindow(QMainWindow):
         if getattr(self, "_is_playing_series_in_details", False):
             self._stop_series_details_playback()
 
-        # Mémoriser la section d'origine avant ouverture de la fiche
-        self._details_origin_section = self.current_section
+        # Mémoriser la section d'origine et la recherche active avant ouverture de la fiche
+        if not getattr(self, "_details_origin_section", None):
+            self._details_origin_section = self.current_section
+            tb = getattr(self, "title_bar", None)
+            origin_search = tb.search_box.text().strip() if (tb and hasattr(tb, "search_box")) else ""
+            self._details_origin_search = origin_search
+            self._details_origin_category = getattr(self.categories_panel, "_current_selected_cat", "")
+        else:
+            origin_search = getattr(self, "_details_origin_search", "")
 
         self.current_section = "vod"
         if hasattr(self, "sidebar"):
             self.sidebar.set_active_section("vod")
-        self._update_search_placeholder("vod", clear_text=True)
+        self._update_search_placeholder("vod", clear_text=False)
         self.content_stack.setCurrentIndex(0)
         self.main_content_stack.setCurrentIndex(4)
 
@@ -2299,11 +2448,12 @@ class MainWindow(QMainWindow):
             self.categories_panel.set_stream_type("movie")
             self.categories_panel.set_title("Catégories de films")
             self.categories_panel.set_custom_lists([])
-            self.categories_panel.set_categories(cat_list, default_selected=cat_to_select)
+            default_cat = (self._details_origin_category if origin_search and self._details_origin_category in cat_list else cat_to_select)
+            self.categories_panel.set_categories(cat_list, default_selected=default_cat)
         else:
             self.categories_panel.set_stream_type("movie")
             self.categories_panel.set_custom_lists([])
-            if channel.group_title:
+            if channel.group_title and not origin_search:
                 self.categories_panel.select_category(channel.group_title, emit_signal=False)
 
         self.categories_panel.show()
@@ -2347,7 +2497,11 @@ class MainWindow(QMainWindow):
             self._stop_movie_details_playback()
 
         origin = getattr(self, "_details_origin_section", None) or "vod"
+        origin_search = getattr(self, "_details_origin_search", "")
+        origin_cat = getattr(self, "_details_origin_category", "")
         self._details_origin_section = None
+        self._details_origin_search = ""
+        self._details_origin_category = ""
 
         if origin == "dashboard":
             self.current_section = "dashboard"
@@ -2373,24 +2527,52 @@ class MainWindow(QMainWindow):
                 self.sidebar.set_active_section("recently_added")
             self.content_stack.setCurrentIndex(3)
             self.recently_added_view.refresh_view()
-        else:
+        elif origin == "vod":
             self.current_section = "vod"
             if hasattr(self, "sidebar"):
                 self.sidebar.set_active_section("vod")
             self.content_stack.setCurrentIndex(0)
+            if not self.settings.categories_collapsed:
+                self.categories_panel.show()
+            self.channel_panel.hide()
             self.main_content_stack.setCurrentIndex(1)
-            target_cat = getattr(self.categories_panel, "_current_selected_cat", "") or "Tous les films"
+            pl_id = self.get_selected_playlist_id()
+            if origin_search:
+                if origin_cat:
+                    self.categories_panel.select_category(origin_cat, emit_signal=False)
+                tb = getattr(self, "title_bar", None)
+                if tb and hasattr(tb, "search_box") and tb.search_box.text() != origin_search:
+                    tb.search_box.blockSignals(True)
+                    tb.search_box.setText(origin_search)
+                    tb.search_box.blockSignals(False)
+                if self.vod_grid_view.search_query != origin_search:
+                    self.vod_grid_view.set_search_query(origin_search)
+                    if hasattr(self.vod_grid_view, "_apply_search"):
+                        self.vod_grid_view._apply_search()
+            else:
+                target_cat = origin_cat or getattr(self.categories_panel, "_current_selected_cat", "") or "Tous les films"
+                if self.vod_grid_view.current_playlist_id != pl_id or self.vod_grid_view.current_category != target_cat:
+                    self.vod_grid_view.set_playlist_and_category(pl_id, target_cat)
+            self.vod_grid_view.update_all_progress_bars()
+        else:
+            self.current_section = origin
+            if hasattr(self, "sidebar"):
+                self.sidebar.set_active_section(origin)
+            self.content_stack.setCurrentIndex(0)
+            self.main_content_stack.setCurrentIndex(1)
+            target_cat = origin_cat or getattr(self.categories_panel, "_current_selected_cat", "") or "Tous les films"
             pl_id = self.get_selected_playlist_id()
             if self.vod_grid_view.current_playlist_id != pl_id or self.vod_grid_view.current_category != target_cat:
                 self.vod_grid_view.set_playlist_and_category(pl_id, target_cat)
             self.vod_grid_view.update_all_progress_bars()
-        self._update_search_placeholder(self.current_section, clear_text=True)
+        self._update_search_placeholder(self.current_section, clear_text=not bool(origin_search))
         self._apply_layout_geometry()
 
     def _on_movie_details_play_requested(self, channel: Channel, start_pos: float):
         """Lance la lecture d'un film dans le conteneur scrollable de sa fiche détaillée."""
         if getattr(self, "_is_playing_trailer", False):
             self._stop_trailer_playback()
+        self._stopped_at_episode_end = False
         self._is_playing_movie_in_details = True
         self._return_target_index = 4
         self.current_channel = channel
@@ -2454,6 +2636,7 @@ class MainWindow(QMainWindow):
         """Arrête la lecture du film dans la fiche détaillée et remet le lecteur en place."""
         if not getattr(self, "_is_playing_movie_in_details", False):
             return
+        self._stopped_at_episode_end = False
         self._is_playing_movie_in_details = False
         self._save_current_playback_progress()
         self.current_channel = None
@@ -2470,6 +2653,7 @@ class MainWindow(QMainWindow):
 
     def _on_play_trailer_requested(self, title: str, trailer_url: str, origin: str):
         """Lance la lecture d'une bande-annonce YouTube intégrée dans la fiche (film ou série)."""
+        self._stopped_at_episode_end = False
         if getattr(self, "_is_playing_movie_in_details", False):
             self._stop_movie_details_playback()
         if getattr(self, "_is_playing_series_in_details", False):
@@ -2917,10 +3101,13 @@ class MainWindow(QMainWindow):
         self.player_controller.set_deinterlace(self.settings.deinterlace)
         self.player_controller.set_preferred_audio_lang(self.settings.preferred_audio_lang)
         self.player_controller.set_preferred_subtitle_lang(self.settings.preferred_subtitle_lang, self.settings.subtitles_enabled)
-        if hasattr(self, "video_widget") and hasattr(self.video_widget, "controls"):
-            self.video_widget.controls.set_auto_next_state(
-                getattr(self.settings, "auto_play_next_episode", True)
-            )
+        if hasattr(self, "video_widget"):
+            if hasattr(self.video_widget, "set_osd_hover_mode"):
+                self.video_widget.set_osd_hover_mode(getattr(self.settings, "osd_hover_mode", True))
+            if hasattr(self.video_widget, "controls"):
+                self.video_widget.controls.set_auto_next_state(
+                    getattr(self.settings, "auto_play_next_episode", True)
+                )
         if getattr(self.settings, "auto_play_next_episode", True) and getattr(self, "_stopped_at_episode_end", False):
             self._play_next_series_episode()
 

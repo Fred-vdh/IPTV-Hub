@@ -4,7 +4,7 @@
 
 #define MyAppName "IPTV Hub"
 #ifndef MyAppVersion
-#define MyAppVersion "2.3.1"
+#define MyAppVersion "2.4.0"
 #endif
 #define MyAppPublisher "IPTV Hub Team"
 #define MyAppExeName "IPTV_Hub.exe"

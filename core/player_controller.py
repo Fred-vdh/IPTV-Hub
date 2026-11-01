@@ -413,6 +413,11 @@ class PlayerController(QObject):
             self._current_state = new_state
             self.state_changed.emit(new_state)
 
+    @property
+    def state(self) -> str:
+        """État actuel du lecteur ('stopped', 'buffering', 'playing', 'paused', 'error')."""
+        return self._current_state
+
     def _init_mpv(self):
         """Instancie et configure libmpv avec des options optimisées pour l'IPTV."""
         try:
@@ -668,11 +673,11 @@ class PlayerController(QObject):
             return
 
         # Protection anti-faux-EOF : vérifier qu'on était bien en fin de média
-        # Si on est à moins de 85% de la vidéo, ce n'est PAS un EOF naturel (ex: arrêt utilisateur ou coupure)
+        # Si on est encore loin de la fin (> 20s et < 95%), ce n'est PAS un EOF naturel (ex: coupure réseau IPTV)
         try:
             pos = float(self._player.time_pos or 0.0) if self._player else 0.0
             dur = float(self._player.duration or 0.0) if self._player else 0.0
-            if dur > 60 and pos < (dur * 0.85) and (dur - pos) > 60:
+            if dur > 30 and (dur - pos) > 20 and pos < (dur * 0.95):
                 return
         except Exception:
             pass

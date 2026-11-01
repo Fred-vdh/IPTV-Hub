@@ -45,36 +45,35 @@ def main():
     from core.version import __version__
     tag_name = f"v{__version__}"
 
-    # 2. Création de la Release v2.3.1
-    release_body = f"""## 🚀 IPTV Hub {tag_name} - Stabilité du lecteur, Multiview enrichi et confort de visionnage
+    # 2. Création de la Release v2.4.0
+    release_body = f"""## 🚀 IPTV Hub {tag_name} - Moteur hybride Rust, Fiabilité du lecteur & Nouvelle expérience OSD
 
-Bienvenue dans la version **{__version__}** d'**IPTV Hub**, le lecteur multimédia IPTV & VOD moderne, rapide et élégant propulsé nativement par PyQt6 et libmpv !
+Bienvenue dans la version **{__version__}** d'**IPTV Hub**, le lecteur multimédia IPTV & VOD moderne, rapide et élégant propulsé nativement par PyQt6, libmpv et accéléré en Rust !
 
 ---
 
 ### ✨ Nouveautés & Améliorations de cette version :
 
-1. **🛡️ Robustesse native & Anti-crash (Windows & Linux)** :
-   - Refonte du cycle de vie des workers Qt (`qt_worker_utils`) avec suivi natif des threads et protection contre les destructions asynchrones C++.
-   - Isolation du thread libmpv : marshaling sécurisé des callbacks et observateurs vers la boucle d'événements Qt via file protégée et pompage non-bloquant.
-   - Gestionnaire VEH minimaliste (`native_crash_log`) remplaçant faulthandler pour une traçabilité claire des anomalies sans conflit avec les SEH internes de libmpv.
+1. **🚀 Moteur Rust hybride ultra-rapide (`iptv_core_rs`)** :
+   - Indexation en mémoire et moteur de recherche floue (fuzzy search) haute performance pour l'ensemble du catalogue.
+   - Filtrage et tris instantanés des chaînes, films et séries sans aucune latence sur les playlists volumineuses.
+   - Parsing accéléré et gestion optimisée des flux M3U et métadonnées EPG.
 
-2. **📺 Mode Multiview perfectionné (Multi-écrans TV)** :
-   - Sortie du Multiview fiabilisée avec libération étalée des ressources vidéo pour éviter tout gel d'affichage.
-   - Sélecteur de chaîne repensé avec scopes clairs : toutes les chaînes, listes personnalisées et catégories.
-   - Bandeau d'information OSD complet sur chaque écran avec EPG, badge dynamique et raccourcis d'édition/suppression.
-   - Masquage automatique du bouton Multiview de la barre de contrôle hors de la télévision en direct (films, séries, replays).
+2. **🛡️ Fiabilisation du lecteur & Correction critique de l'écran noir** :
+   - Correction d'une régression empêchant la pause/reprise normale au clic dans les fiches détaillées de films et provoquant un écran noir.
+   - Exposition officielle de la propriété `state` sur `PlayerController` et sécurisation des transitions d'états.
+   - Réinitialisation systématique des drapeaux de fin de série lors de l'ouverture d'un film ou d'une bande-annonce.
+   - Protection de l'intégrité de la pile de lecture vidéo (`player_stack`) et détachement/rattachement sécurisé.
 
-3. **🎬 Suivi de visionnage & Reprise de lecture intelligente** :
-   - Reprise de lecture des séries optimisée pour repartir automatiquement du premier épisode non vu le plus ancien.
-   - Chaîne de repli d'URL multi-hôtes pour les vignettes d'épisodes de séries manquantes.
-   - Fiabilisation complète de la reprise des films : isolation des déclencheurs d'intro/outro pour éviter tout marquage prématuré à 100%.
+3. **🌟 Nouvel écran de démarrage (Splash Screen) & Confort visuel** :
+   - Écran de chargement moderne et animé au démarrage informant de la progression de l'initialisation et du chargement de la base de données.
+   - Mode survol intelligent pour l'OSD (`osd_hover_mode`) avec disparition automatique des contrôles et du curseur pour une immersion totale.
+   - Fluidité accrue des commandes interactives de lecture et de saut temporel (+10s / -10s).
 
-4. **✨ Épuration de l'interface & Ergonomie** :
-   - Épuration du Tableau de bord et de l'onglet Récemment regardé : suppression des chaînes TV en direct pour éliminer la pollution liée au zapping.
-   - Mise en pause instantanée d'un simple clic dès le premier essai (y compris après basculement plein écran ou retour depuis une autre fenêtre).
-   - Optimisation et fluidification des transitions plein écran (suppression des re-calculs CSS et suspension ciblée des repositionnements).
-   - Navigation fluide et retour contextualisé depuis les fiches de détails.
+4. **🎬 Recherche d'artistes & Filmographie enrichie** :
+   - Recherche globale d'acteurs et réalisateurs avec suggestions dynamiques et dialogue interactif.
+   - Prise en compte enrichie des créateurs et scénaristes de séries.
+   - Optimisation de la grille VOD et de la pagination asynchrone pour un défilement ultra-fluide.
 
 ---
 

@@ -24,6 +24,9 @@ build/
 build_appimage/
 dist/
 dist_installer/
+target/
+rust_core/target/
+*.whl
 *.spec.bak
 
 # ==============================================================================

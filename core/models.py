@@ -68,6 +68,7 @@ def parse_movie_metadata(name: str, raw_rating: str = "", raw_year: str = "") ->
     - rating: Note formatée (ex: "7.3")
     """
     clean_name = name.strip()
+    norm_nfkd = unicodedata.normalize("NFKD", clean_name)
 
     # 1. Extraction de la qualité / format audio
     quality_patterns = [
@@ -80,7 +81,7 @@ def parse_movie_metadata(name: str, raw_rating: str = "", raw_year: str = "") ->
     ]
     quality_tag = ""
     for pat in quality_patterns:
-        m = re.search(pat, clean_name, re.IGNORECASE)
+        m = re.search(pat, clean_name, re.IGNORECASE) or re.search(pat, norm_nfkd, re.IGNORECASE)
         if m:
             quality_tag = m.group(1).upper()
             break
@@ -247,6 +248,7 @@ class AppSettings:
     introdb_intro_skip: bool = True
     introdb_outro_skip: bool = True
     app_language: str = "fr"
+    osd_hover_mode: bool = True
 
     @property
     def sync_interval_live_hours(self) -> int:

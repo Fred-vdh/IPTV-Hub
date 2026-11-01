@@ -238,6 +238,12 @@ class SeriesEpisodesDialog(QDialog):
                         self.episodes_by_season[s_str] = []
                     self.episodes_by_season[s_str].append(item)
 
+        # Trier chaque saison individuellement par numéro d'épisode pour un ordre séquentiel strict
+        for s_key in self.episodes_by_season:
+            self.episodes_by_season[s_key].sort(
+                key=lambda ep: int(ep.get("episode_num", 1)) if str(ep.get("episode_num", 1)).isdigit() else 999
+            )
+
         # Remplissage de la liste des saisons
         self.season_combo.blockSignals(True)
         self.season_combo.clear()
@@ -340,7 +346,11 @@ class SeriesEpisodesDialog(QDialog):
         sorted_seasons = sorted(self.episodes_by_season.keys(), key=lambda x: int(x) if x.isdigit() else 999)
 
         for s in sorted_seasons:
-            for ep in self.episodes_by_season[s]:
+            eps = sorted(
+                self.episodes_by_season[s],
+                key=lambda ep: int(ep.get("episode_num", 1)) if str(ep.get("episode_num", 1)).isdigit() else 999
+            )
+            for ep in eps:
                 curr_ep_id = str(ep.get("id", ""))
                 curr_ext = ep.get("container_extension", "mp4")
                 curr_ep_num = ep.get("episode_num", 1)

@@ -21,17 +21,17 @@ IPTV Hub est compatible avec toutes les distributions Linux modernes (Ubuntu, De
 
 Sous **Ubuntu / Debian / Linux Mint** :
 ```bash
-sudo apt update && sudo apt install -y python3 python3-venv python3-pip libmpv-dev libmpv2
+sudo apt update && sudo apt install -y python3 python3-venv python3-pip libmpv-dev libmpv2 libxcb-cursor0
 ```
 
 Sous **Fedora** :
 ```bash
-sudo dnf install -y python3 python3-pip mpv-libs-devel
+sudo dnf install -y python3 python3-pip mpv-libs-devel xcb-util-cursor
 ```
 
 Sous **Arch Linux / Manjaro** :
 ```bash
-sudo pacman -S python python-pip mpv
+sudo pacman -S python python-pip mpv xcb-util-cursor
 ```
 
 ## Installation rapide

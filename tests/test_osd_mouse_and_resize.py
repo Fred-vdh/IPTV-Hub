@@ -108,6 +108,81 @@ class TestOSDMouseAndResize(unittest.TestCase):
         self.assertFalse(self.widget.controls.isVisibleTo(self.widget))
         self.assertEqual(self.widget.cursor().shape(), Qt.CursorShape.BlankCursor)
 
+    def test_hover_mode_center_move_does_not_show_osd(self):
+        """En mode survol, un déplacement au centre de la vidéo n'affiche pas l'OSD."""
+        self.widget.set_osd_hover_mode(True)
+        self.widget.resize(800, 600)
+        self.widget._sync_geometry()
+        self.assertFalse(self.widget.controls.isVisibleTo(self.widget))
+
+        # Déplacement au milieu de la vidéo (hors zone OSD)
+        move_event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(400, 300),
+            QPointF(400, 300),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier
+        )
+        self.widget.eventFilter(self.widget.video_surface, move_event)
+        self.assertFalse(self.widget.controls.isVisibleTo(self.widget))
+        # Le curseur souris doit néanmoins être visible pour viser/cliquer
+        self.assertEqual(self.widget.cursor().shape(), Qt.CursorShape.ArrowCursor)
+
+    def test_hover_mode_bottom_zone_shows_osd(self):
+        """En mode survol, déplacer la souris dans la zone basse de l'OSD l'affiche immédiatement."""
+        self.widget.set_osd_hover_mode(True)
+        self.widget.resize(800, 600)
+        self.widget._sync_geometry()
+        self.assertFalse(self.widget.controls.isVisibleTo(self.widget))
+
+        # Déplacement dans la barre basse (y = 560 sur hauteur 600)
+        global_bottom_pt = self.widget.mapToGlobal(QPoint(400, 560))
+        move_event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(400, 560),
+            QPointF(global_bottom_pt.x(), global_bottom_pt.y()),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier
+        )
+        self.widget.eventFilter(self.widget.video_surface, move_event)
+        self.assertTrue(self.widget.controls.isVisibleTo(self.widget))
+
+    def test_hover_mode_leaving_zone_hides_osd(self):
+        """En mode survol, quitter la zone OSD masque rapidement l'OSD sans attendre 3.5s."""
+        self.widget.set_osd_hover_mode(True)
+        self.widget.resize(800, 600)
+        self.widget._sync_geometry()
+        self.widget._show_osd()
+        self.assertTrue(self.widget.controls.isVisibleTo(self.widget))
+
+        # Déplacement vers le centre (hors zone OSD)
+        global_center_pt = self.widget.mapToGlobal(QPoint(400, 300))
+        move_event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(400, 300),
+            QPointF(global_center_pt.x(), global_center_pt.y()),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier
+        )
+        self.widget.eventFilter(self.widget.video_surface, move_event)
+        # Déclenchement du timeout rapide de sortie
+        self.widget._on_hover_leave_timeout()
+        self.assertFalse(self.widget.controls.isVisibleTo(self.widget))
+
+    def test_hover_mode_leave_event_hides_immediately(self):
+        """En mode survol, un événement Leave masque l'OSD immédiatement."""
+        from PyQt6.QtCore import QEvent
+        self.widget.set_osd_hover_mode(True)
+        self.widget._show_osd()
+        self.assertTrue(self.widget.controls.isVisibleTo(self.widget))
+
+        leave_event = QEvent(QEvent.Type.Leave)
+        self.widget.eventFilter(self.widget, leave_event)
+        self.assertFalse(self.widget.controls.isVisibleTo(self.widget))
+
 
 if __name__ == "__main__":
     unittest.main()

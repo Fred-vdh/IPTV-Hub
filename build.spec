@@ -53,6 +53,7 @@ hiddenimports = [
     "certifi",
     "ssl",
     "qrcode",
+    "iptv_core_rs",
 ]
 
 # Inclusion explicite de TOUS les sous-modules des packages locaux.
@@ -103,6 +104,7 @@ hiddenimports += [
     "ui.widgets.series_details_view",
     "ui.widgets.settings_view",
     "ui.widgets.sidebar",
+    "ui.widgets.splash_screen",
     "ui.widgets.stream_buffering_indicator",
     "ui.widgets.vod_grid",
     "core",

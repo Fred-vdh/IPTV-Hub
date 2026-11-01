@@ -7,12 +7,21 @@ import gzip
 import io
 import urllib.request
 import re
+import logging
 from pathlib import Path
 from typing import List, Optional, Callable
 import xml.etree.ElementTree as ET
 
 from core.models import EPGProgram
 from core.database import Database
+
+logger = logging.getLogger("IPTV.EPGManager")
+
+try:
+    import iptv_core_rs
+    HAS_RUST_CORE = getattr(iptv_core_rs, "is_rust_core_active", lambda: False)()
+except ImportError:
+    HAS_RUST_CORE = False
 
 
 def parse_xmltv_date(date_str: str) -> str:
@@ -21,6 +30,11 @@ def parse_xmltv_date(date_str: str) -> str:
     """
     if not date_str:
         return ""
+    if HAS_RUST_CORE:
+        try:
+            return iptv_core_rs.parse_xmltv_date(date_str)
+        except Exception:
+            pass
     clean = date_str.strip()
     match = re.match(r"^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})?", clean)
     if match:
@@ -30,6 +44,7 @@ def parse_xmltv_date(date_str: str) -> str:
             iso += f"{tz[:3]}:{tz[3:]}"
         return iso
     return clean
+
 
 
 class EPGManager:
@@ -98,11 +113,41 @@ class EPGManager:
 
         return total_count
 
+    def _save_raw_batch(self, batch: List[tuple]):
+        """Sauvegarde un lot brut de programmes EPG."""
+        if hasattr(self.db, "save_epg_batch_raw"):
+            self.db.save_epg_batch_raw(batch)
+        else:
+            progs = [
+                EPGProgram(
+                    tvg_id=p[0],
+                    title=p[1],
+                    description=p[2],
+                    start_time=p[3],
+                    end_time=p[4],
+                    category=p[5],
+                    icon_url=p[6]
+                )
+                for p in batch
+            ]
+            self.db.save_epg_batch(progs)
+
     def load_from_file(self, file_path: str, progress_callback: Optional[Callable[[int], None]] = None) -> int:
         """Charge l'EPG depuis un fichier local .xml ou .xml.gz."""
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"Fichier EPG introuvable: {file_path}")
+
+        if HAS_RUST_CORE:
+            try:
+                return iptv_core_rs.parse_epg_file(
+                    str(path),
+                    self._save_raw_batch,
+                    batch_size=2000,
+                    progress_callback=progress_callback
+                )
+            except Exception as e:
+                logger.warning(f"Rust EPG file parser fallback to Python: {e}")
 
         if file_path.endswith(".gz"):
             with gzip.open(file_path, "rb") as gz_file:
@@ -120,9 +165,21 @@ class EPGManager:
         with urllib.request.urlopen(req, timeout=60) as response:
             raw_data = response.read()
 
+            if HAS_RUST_CORE:
+                try:
+                    return iptv_core_rs.parse_epg_bytes(
+                        raw_data,
+                        self._save_raw_batch,
+                        batch_size=2000,
+                        progress_callback=progress_callback
+                    )
+                except Exception as e:
+                    logger.warning(f"Rust EPG bytes parser fallback to Python: {e}")
+
             # Vérification du magic number gzip (0x1f, 0x8b)
             if raw_data.startswith(b"\x1f\x8b") or url.endswith(".gz"):
                 decompressed = gzip.decompress(raw_data)
                 return self.parse_xmltv_stream(io.BytesIO(decompressed), progress_callback=progress_callback)
             else:
                 return self.parse_xmltv_stream(io.BytesIO(raw_data), progress_callback=progress_callback)
+

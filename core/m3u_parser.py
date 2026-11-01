@@ -5,10 +5,19 @@ Parser M3U / M3U8 haute performance pour l'extraction des flux IPTV et métadonn
 import re
 import urllib.request
 import urllib.parse
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Generator, Callable
 from core.models import Channel
+
+logger = logging.getLogger("IPTV.M3UParser")
+
+try:
+    import iptv_core_rs
+    HAS_RUST_CORE = getattr(iptv_core_rs, "is_rust_core_active", lambda: False)()
+except ImportError:
+    HAS_RUST_CORE = False
 
 
 # Expressions régulières pour l'extraction d'attributs M3U
@@ -32,6 +41,19 @@ class M3UParser:
         """
         Parse les lignes de contenu M3U et retourne une liste d'objets Channel.
         """
+        if HAS_RUST_CORE and isinstance(content_lines, list):
+            try:
+                raw_items = iptv_core_rs.parse_m3u_raw_text("\n".join(content_lines), progress_callback)
+                return [
+                    Channel(
+                        None, playlist_id, t[0], t[1], t[2], t[3], t[4], t[5],
+                        t[6], t[7], False, True, t[8], None, t[9],
+                        "", "", t[11], None, t[10], 0, 0
+                    )
+                    for t in raw_items
+                ]
+            except Exception as e:
+                logger.warning(f"Rust M3U parser fallback to Python: {e}")
         channels: List[Channel] = []
         current_extinf_attrs: Dict[str, str] = {}
         current_name: str = ""
@@ -159,6 +181,20 @@ class M3UParser:
         if not path.exists():
             raise FileNotFoundError(f"Fichier M3U introuvable : {file_path}")
 
+        if HAS_RUST_CORE:
+            try:
+                raw_items = iptv_core_rs.parse_m3u_raw_file(str(path), progress_callback)
+                return [
+                    Channel(
+                        None, playlist_id, t[0], t[1], t[2], t[3], t[4], t[5],
+                        t[6], t[7], False, True, t[8], None, t[9],
+                        "", "", t[11], None, t[10], 0, 0
+                    )
+                    for t in raw_items
+                ]
+            except Exception as e:
+                logger.warning(f"Rust M3U parse_file fallback to Python: {e}")
+
         # Détection encodage utf-8 ou latin-1
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -181,5 +217,21 @@ class M3UParser:
                 text = raw_data.decode("utf-8")
             except UnicodeDecodeError:
                 text = raw_data.decode("latin-1", errors="ignore")
+
+            if HAS_RUST_CORE:
+                try:
+                    raw_items = iptv_core_rs.parse_m3u_raw_text(text, progress_callback)
+                    return [
+                        Channel(
+                            None, playlist_id, t[0], t[1], t[2], t[3], t[4], t[5],
+                            t[6], t[7], False, True, t[8], None, t[9],
+                            "", "", t[11], None, t[10], 0, 0
+                        )
+                        for t in raw_items
+                    ]
+                except Exception as e:
+                    logger.warning(f"Rust M3U parse_url fallback to Python: {e}")
+
             lines = text.splitlines()
             return cls.parse_content(lines, playlist_id, progress_callback)
+

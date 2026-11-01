@@ -105,6 +105,20 @@ class MPVVideoWidget(QWidget):
         self._last_mouse_pos: Optional[QPoint] = None
         self._osd_suspended: bool = False
         self._was_mouse_on_controls: bool = False
+
+        # Mode OSD survol : n'afficher l'OSD que lorsque la souris entre dans sa zone,
+        # et masquer l'OSD dès qu'elle en sort.
+        self.osd_hover_mode: bool = False
+        self._hover_leave_timer = QTimer(self)
+        self._hover_leave_timer.setSingleShot(True)
+        self._hover_leave_timer.setInterval(120)
+        self._hover_leave_timer.timeout.connect(self._on_hover_leave_timeout)
+
+        self._cursor_autohide_timer = QTimer(self)
+        self._cursor_autohide_timer.setSingleShot(True)
+        self._cursor_autohide_timer.setInterval(1800)
+        self._cursor_autohide_timer.timeout.connect(self._on_cursor_autohide_timeout)
+
         self._install_controls_event_filters()
         self.video_surface.installEventFilter(self)
         self.installEventFilter(self)
@@ -185,6 +199,10 @@ class MPVVideoWidget(QWidget):
         if hasattr(self, "skip_intro_overlay") and self.skip_intro_overlay:
             self.skip_intro_overlay.hide()
         self.osd_timer.stop()
+        if hasattr(self, "_hover_leave_timer"):
+            self._hover_leave_timer.stop()
+        if hasattr(self, "_cursor_autohide_timer"):
+            self._cursor_autohide_timer.stop()
 
     def closeEvent(self, event):
         if hasattr(self, "controls") and self.controls:
@@ -196,6 +214,10 @@ class MPVVideoWidget(QWidget):
             self.skip_intro_overlay.hide()
         if hasattr(self, "osd_timer"):
             self.osd_timer.stop()
+        if hasattr(self, "_hover_leave_timer"):
+            self._hover_leave_timer.stop()
+        if hasattr(self, "_cursor_autohide_timer"):
+            self._cursor_autohide_timer.stop()
         if hasattr(self, "video_surface") and self.video_surface:
             try:
                 self.video_surface.cleanup_render_context()
@@ -294,6 +316,111 @@ class MPVVideoWidget(QWidget):
                 return True
         return False
 
+    def set_osd_hover_mode(self, enabled: bool):
+        """Active ou désactive le mode où l'OSD n'apparaît qu'au survol de sa zone et disparaît à la sortie."""
+        self.osd_hover_mode = bool(enabled)
+        if hasattr(self, "_hover_leave_timer"):
+            self._hover_leave_timer.stop()
+
+    def _is_mouse_in_osd_zone(self, global_pos: Optional[QPoint] = None) -> bool:
+        """Vérifie si la position globale se trouve dans la zone active de l'OSD ou des overlays."""
+        if global_pos is None:
+            global_pos = self._last_mouse_pos if self._last_mouse_pos is not None else QCursor.pos()
+
+        # 1. Overlays interactifs (IntroDB : Skip intro, Next episode)
+        if hasattr(self, "next_ep_overlay") and self.next_ep_overlay and self.next_ep_overlay.isVisible():
+            ov_rect = QRect(self.next_ep_overlay.mapToGlobal(QPoint(0, 0)), self.next_ep_overlay.size())
+            if ov_rect.contains(global_pos):
+                return True
+        if hasattr(self, "skip_intro_overlay") and self.skip_intro_overlay and self.skip_intro_overlay.isVisible():
+            s_rect = QRect(self.skip_intro_overlay.mapToGlobal(QPoint(0, 0)), self.skip_intro_overlay.size())
+            if s_rect.contains(global_pos):
+                return True
+
+        if not hasattr(self, "controls") or not self.controls:
+            return False
+
+        # 2. Sliders en cours de glissement
+        if hasattr(self.controls, "timeline_slider") and self.controls.timeline_slider.isSliderDown():
+            return True
+        if hasattr(self.controls, "volume_slider") and self.controls.volume_slider.isSliderDown():
+            return True
+
+        # 3. Infobulle personnalisée active sur la timeline
+        if hasattr(self.controls, "osd_tooltip") and self.controls.osd_tooltip.isVisible():
+            tt_rect = QRect(self.controls.osd_tooltip.mapToGlobal(QPoint(0, 0)), self.controls.osd_tooltip.size())
+            if tt_rect.contains(global_pos):
+                return True
+
+        # 4. Position relative dans le conteneur vidéo
+        local_pos = self.mapFromGlobal(global_pos)
+        w = self.width()
+        h = self.height()
+
+        if local_pos.x() < 0 or local_pos.x() > w or local_pos.y() < 0 or local_pos.y() > h:
+            return False
+
+        # 5. Barre inférieure (contrôles de lecture)
+        if hasattr(self.controls, "bottom_bar") and self.controls.bottom_bar.isVisible():
+            bot_rect = QRect(self.controls.bottom_bar.mapToGlobal(QPoint(0, 0)), self.controls.bottom_bar.size())
+            # Marge de confort de 12px au-dessus de la barre
+            bot_rect_comfort = bot_rect.adjusted(0, -12, 0, 0)
+            if bot_rect_comfort.contains(global_pos):
+                return True
+        else:
+            # Même si masquée, zone d'activation basse
+            bb_h = 95
+            if hasattr(self.controls, "bottom_bar"):
+                sh = self.controls.bottom_bar.sizeHint().height()
+                if sh > 40:
+                    bb_h = max(bb_h, sh)
+            if local_pos.y() >= (h - bb_h):
+                return True
+
+        # 6. Barre supérieure (titre chaîne / bouton retour)
+        if hasattr(self.controls, "top_bar") and self.controls.top_bar.isVisible():
+            top_rect = QRect(self.controls.top_bar.mapToGlobal(QPoint(0, 0)), self.controls.top_bar.size())
+            top_rect_comfort = top_rect.adjusted(-10, -10, 10, 10)
+            if top_rect_comfort.contains(global_pos):
+                return True
+        else:
+            # Zone d'activation haute (coin supérieur gauche)
+            tb_h = 60
+            tb_w = 400
+            if hasattr(self.controls, "top_bar"):
+                sh = self.controls.top_bar.sizeHint()
+                if sh.height() > 20:
+                    tb_h = max(tb_h, sh.height() + 20)
+                if sh.width() > 100:
+                    tb_w = max(tb_w, sh.width() + 40)
+            if local_pos.y() <= tb_h and local_pos.x() <= tb_w:
+                return True
+
+        return False
+
+    def _trigger_hover_leave_hide(self):
+        """Déclenche le masquage rapide (120ms) de l'OSD dès que la souris quitte sa zone."""
+        if hasattr(self, "_hover_leave_timer"):
+            self._hover_leave_timer.start()
+
+    def _cancel_hover_leave_timer(self):
+        if hasattr(self, "_hover_leave_timer") and self._hover_leave_timer.isActive():
+            self._hover_leave_timer.stop()
+
+    def _on_hover_leave_timeout(self):
+        if getattr(self, "osd_hover_mode", False) and not self._is_mouse_in_osd_zone():
+            self._hide_osd(force=True)
+
+    def _start_cursor_autohide_timer(self):
+        if not hasattr(self, "controls") or not self.controls.has_active_media or getattr(self.controls, "is_paused", False):
+            return
+        if hasattr(self, "_cursor_autohide_timer"):
+            self._cursor_autohide_timer.start()
+
+    def _on_cursor_autohide_timeout(self):
+        if getattr(self, "osd_hover_mode", False) and not self._is_mouse_in_osd_zone():
+            self.hide_mouse_cursor()
+
     def suppress_clicks(self, duration: float = 0.35):
         """Verrouille temporairement le rebond consécutif à un double-clic."""
         now = time.monotonic()
@@ -379,42 +506,78 @@ class MPVVideoWidget(QWidget):
             else:
                 global_pos = QCursor.pos()
 
-            # Vérifier si la souris est positionnée sur la barre de contrôle de l'OSD
-            if self._is_mouse_on_controls_bar(global_pos):
-                self.osd_timer.stop()
-                self._was_mouse_on_controls = True
-                self.show_mouse_cursor()
-                if not self.controls.isVisible() and self.controls.has_active_media:
-                    self._show_osd()
-            else:
-                if getattr(self, "_was_mouse_on_controls", False):
-                    # Transition : la souris vient de sortir de la zone de la barre de contrôle
-                    self._was_mouse_on_controls = False
-                    self._last_mouse_pos = global_pos
-                    if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
-                        self.osd_timer.start()
-                else:
-                    if self._last_mouse_pos is not None:
-                        if (global_pos - self._last_mouse_pos).manhattanLength() < 4:
-                            return False
-                    self._last_mouse_pos = global_pos
-                    if self.controls.has_active_media:
+            if getattr(self, "osd_hover_mode", False):
+                self._last_mouse_pos = global_pos
+                if self._is_mouse_in_osd_zone(global_pos):
+                    self._cancel_hover_leave_timer()
+                    self.osd_timer.stop()
+                    self._was_mouse_on_controls = True
+                    self.show_mouse_cursor()
+                    if hasattr(self, "_cursor_autohide_timer"):
+                        self._cursor_autohide_timer.stop()
+                    if self.controls.has_active_media and not self.controls.are_bars_visible():
                         self._show_osd()
+                else:
+                    self.show_mouse_cursor()
+                    self._start_cursor_autohide_timer()
+                    if getattr(self, "_was_mouse_on_controls", False) or self.controls.are_bars_visible():
+                        self._was_mouse_on_controls = False
+                        if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+                            self._trigger_hover_leave_hide()
+            else:
+                # Vérifier si la souris est positionnée sur la barre de contrôle de l'OSD
+                if self._is_mouse_on_controls_bar(global_pos):
+                    self.osd_timer.stop()
+                    self._was_mouse_on_controls = True
+                    self.show_mouse_cursor()
+                    if not self.controls.isVisible() and self.controls.has_active_media:
+                        self._show_osd()
+                else:
+                    if getattr(self, "_was_mouse_on_controls", False):
+                        # Transition : la souris vient de sortir de la zone de la barre de contrôle
+                        self._was_mouse_on_controls = False
+                        self._last_mouse_pos = global_pos
+                        if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+                            self.osd_timer.start()
+                    else:
+                        if self._last_mouse_pos is not None:
+                            if (global_pos - self._last_mouse_pos).manhattanLength() < 4:
+                                return False
+                        self._last_mouse_pos = global_pos
+                        if self.controls.has_active_media:
+                            self._show_osd()
 
         elif event_type == QEvent.Type.Leave:
             if hasattr(self, "controls") and self.controls:
                 self.controls.hide_custom_tooltip()
-            self.show_mouse_cursor()
-            if getattr(self, "_was_mouse_on_controls", False) and not self._is_mouse_on_controls_bar():
+            if getattr(self, "osd_hover_mode", False):
                 self._was_mouse_on_controls = False
+                self._cancel_hover_leave_timer()
+                self._last_mouse_pos = QPoint(-9999, -9999)
                 if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
-                    self.osd_timer.start()
+                    self._hide_osd(force=True)
+            else:
+                self.show_mouse_cursor()
+                if getattr(self, "_was_mouse_on_controls", False) and not self._is_mouse_on_controls_bar():
+                    self._was_mouse_on_controls = False
+                    if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+                        self.osd_timer.start()
 
         elif event_type == QEvent.Type.Enter:
             self.show_mouse_cursor()
-            if self._is_mouse_on_controls_bar():
-                self.osd_timer.stop()
-                self._was_mouse_on_controls = True
+            if getattr(self, "osd_hover_mode", False):
+                if self._is_mouse_in_osd_zone():
+                    self._cancel_hover_leave_timer()
+                    self.osd_timer.stop()
+                    self._was_mouse_on_controls = True
+                    if self.controls.has_active_media and not self.controls.are_bars_visible():
+                        self._show_osd()
+                else:
+                    self._start_cursor_autohide_timer()
+            else:
+                if self._is_mouse_on_controls_bar():
+                    self.osd_timer.stop()
+                    self._was_mouse_on_controls = True
 
         elif event_type == QEvent.Type.MouseButtonPress:
             if hasattr(self, "controls") and self.controls:
@@ -468,21 +631,39 @@ class MPVVideoWidget(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent):
         global_pos = event.globalPosition().toPoint()
-        if self._is_mouse_on_controls_bar(global_pos):
-            self.osd_timer.stop()
-            self._was_mouse_on_controls = True
-        else:
-            if getattr(self, "_was_mouse_on_controls", False):
-                self._was_mouse_on_controls = False
-                if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
-                    self.osd_timer.start()
-            else:
-                if self._last_mouse_pos is not None:
-                    if (global_pos - self._last_mouse_pos).manhattanLength() < 4:
-                        return
-                self._last_mouse_pos = global_pos
-                if self.controls.has_active_media:
+        if getattr(self, "osd_hover_mode", False):
+            if self._is_mouse_in_osd_zone(global_pos):
+                self._cancel_hover_leave_timer()
+                self.osd_timer.stop()
+                self._was_mouse_on_controls = True
+                self.show_mouse_cursor()
+                if hasattr(self, "_cursor_autohide_timer"):
+                    self._cursor_autohide_timer.stop()
+                if self.controls.has_active_media and not self.controls.are_bars_visible():
                     self._show_osd()
+            else:
+                self.show_mouse_cursor()
+                self._start_cursor_autohide_timer()
+                if getattr(self, "_was_mouse_on_controls", False) or self.controls.are_bars_visible():
+                    self._was_mouse_on_controls = False
+                    if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+                        self._trigger_hover_leave_hide()
+        else:
+            if self._is_mouse_on_controls_bar(global_pos):
+                self.osd_timer.stop()
+                self._was_mouse_on_controls = True
+            else:
+                if getattr(self, "_was_mouse_on_controls", False):
+                    self._was_mouse_on_controls = False
+                    if self.controls.has_active_media and not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+                        self.osd_timer.start()
+                else:
+                    if self._last_mouse_pos is not None:
+                        if (global_pos - self._last_mouse_pos).manhattanLength() < 4:
+                            return
+                    self._last_mouse_pos = global_pos
+                    if self.controls.has_active_media:
+                        self._show_osd()
         super().mouseMoveEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent):
@@ -542,8 +723,14 @@ class MPVVideoWidget(QWidget):
                     self.controls.hide()
                     self.hide_mouse_cursor()
                 else:
-                    if not self._is_mouse_on_controls_bar():
-                        self.osd_timer.start()
+                    if getattr(self, "osd_hover_mode", False):
+                        if not self._is_mouse_in_osd_zone():
+                            self._trigger_hover_leave_hide()
+                        else:
+                            self.osd_timer.stop()
+                    else:
+                        if not self._is_mouse_on_controls_bar():
+                            self.osd_timer.start()
             elif state == "paused":
                 # En pause : afficher l'OSD
                 self._show_osd()
@@ -607,24 +794,40 @@ class MPVVideoWidget(QWidget):
         self._raise_overlays()
         self.show_mouse_cursor()
 
-        if self._is_mouse_on_controls_bar():
-            self.osd_timer.stop()
-            self._was_mouse_on_controls = True
-        elif not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
-            self.osd_timer.start()
+        if getattr(self, "osd_hover_mode", False):
+            if self._is_mouse_in_osd_zone():
+                self.osd_timer.stop()
+                self._was_mouse_on_controls = True
+            elif not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+                self.osd_timer.start()
+            else:
+                self.osd_timer.stop()
         else:
-            self.osd_timer.stop()
+            if self._is_mouse_on_controls_bar():
+                self.osd_timer.stop()
+                self._was_mouse_on_controls = True
+            elif not getattr(self.controls, "is_paused", False) and not getattr(self.controls, "is_error", False):
+                self.osd_timer.start()
+            else:
+                self.osd_timer.stop()
 
-    def _hide_osd(self):
+    def _hide_osd(self, force: bool = False):
         """Masque complètement l'OSD après timeout d'inactivité."""
         if getattr(self.controls, "is_paused", False) or getattr(self.controls, "is_error", False):
             return
 
-        # Ne jamais masquer si la souris se trouve sur la barre de contrôle
-        if self._is_mouse_on_controls_bar():
-            self.osd_timer.stop()
-            self._was_mouse_on_controls = True
-            return
+        # Ne jamais masquer si la souris se trouve sur la barre de contrôle (sauf si forcé, ex: Leave)
+        if not force:
+            if getattr(self, "osd_hover_mode", False):
+                if self._is_mouse_in_osd_zone():
+                    self.osd_timer.stop()
+                    self._was_mouse_on_controls = True
+                    return
+            else:
+                if self._is_mouse_on_controls_bar():
+                    self.osd_timer.stop()
+                    self._was_mouse_on_controls = True
+                    return
 
         # Masquer les barres d'OSD
         self.controls.hide_bars()

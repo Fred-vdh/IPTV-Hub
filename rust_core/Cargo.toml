@@ -1,0 +1,20 @@
+[package]
+name = "iptv_core_rs"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "iptv_core_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+regex = "1.11"
+serde_json = "1.0"
+chrono = "0.4"
+encoding_rs = "0.8"
+once_cell = "1.20"
+quick-xml = "0.37"
+flate2 = "1.0"
+fuzzy-matcher = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

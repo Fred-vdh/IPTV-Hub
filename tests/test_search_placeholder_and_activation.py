@@ -114,7 +114,81 @@ class TestSearchPlaceholderAndActivation(unittest.TestCase):
             self.assertEqual(win.current_section, 'replay')
             self.assertEqual(win.title_bar.search_box.placeholderText(), 'Rechercher dans le Replay...')
         finally:
-            pass
+            temp_dir.cleanup()
+
+    @patch('ui.widgets.movie_details_view._TrailerLookupWorker')
+    @patch('ui.widgets.series_details_view._SeriesTrailerLookupWorker')
+    @patch('ui.widgets.series_details_view.SeriesInfoWorker')
+    def test_search_preservation_on_details_navigation(self, mock_w1, mock_w2, mock_w3):
+        from ui.main_window import MainWindow
+
+        temp_dir = tempfile.TemporaryDirectory()
+        db_path = Path(temp_dir.name) / 'test_search_preserv.db'
+        db = Database(str(db_path))
+
+        pl = Playlist(name='TestPL', url_or_path='http://test.m3u')
+        pl_id = db.add_playlist(pl)
+
+        ch_series = Channel(playlist_id=pl_id, name='Brokenwood Mysteries', stream_type='series', group_title='Policier', stream_id='100')
+        ch_movie = Channel(playlist_id=pl_id, name='Quand Harry rencontre Sally', stream_type='movie', group_title='Comedie', stream_id='200')
+        db.save_channels_batch(pl_id, [ch_series, ch_movie], replace=False)
+
+        win = MainWindow(db=db)
+        try:
+            win.series_details_view.load_series = MagicMock()
+            win.movie_details_view.load_movie = MagicMock()
+            win.player_controller.play = MagicMock()
+
+            # --- SÉRIES ---
+            win._on_section_changed('series')
+            self.assertEqual(win.current_section, 'series')
+
+            # L'utilisateur recherche "Brokenwood"
+            win.title_bar.search_box.setText("Brokenwood")
+            win.series_grid_view._apply_search()
+            self.assertEqual(win.series_grid_view.search_query, "Brokenwood")
+
+            # L'utilisateur clique sur la fiche de la série
+            win._open_series_details(ch_series)
+            self.assertEqual(win.current_section, 'series')
+            # La barre de recherche n'a pas été effacée
+            self.assertEqual(win.title_bar.search_box.text(), "Brokenwood")
+
+            # L'utilisateur clique sur Retour
+            win._back_to_series_grid()
+            self.assertEqual(win.current_section, 'series')
+            self.assertEqual(win.title_bar.search_box.text(), "Brokenwood")
+            self.assertEqual(win.series_grid_view.search_query, "Brokenwood")
+
+            # --- FILMS (VOD) ---
+            win._on_section_changed('vod')
+            self.assertEqual(win.current_section, 'vod')
+            # Le changement de section a bien vidé la recherche
+            self.assertEqual(win.title_bar.search_box.text(), "")
+
+            # L'utilisateur recherche "Harry"
+            win.title_bar.search_box.setText("Harry")
+            win.vod_grid_view._apply_search()
+            self.assertEqual(win.vod_grid_view.search_query, "Harry")
+
+            # L'utilisateur clique sur la fiche du film
+            win._open_movie_details(ch_movie)
+            self.assertEqual(win.current_section, 'vod')
+            # La barre de recherche n'a pas été effacée
+            self.assertEqual(win.title_bar.search_box.text(), "Harry")
+
+            # L'utilisateur clique sur Retour
+            win._back_to_vod_grid_from_details()
+            self.assertEqual(win.current_section, 'vod')
+            self.assertEqual(win.title_bar.search_box.text(), "Harry")
+            self.assertEqual(win.vod_grid_view.search_query, "Harry")
+
+            # Clic explicite sur une catégorie : la recherche est bien effacée
+            win._on_category_selected("Comedie")
+            self.assertEqual(win.title_bar.search_box.text(), "")
+            self.assertEqual(win.vod_grid_view.search_query, "")
+        finally:
+            temp_dir.cleanup()
 
     def test_dashboard_view_search_filtering(self):
         db_mock = MagicMock()

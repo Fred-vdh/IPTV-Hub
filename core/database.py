@@ -15,12 +15,22 @@ from core.models import Playlist, Channel, EPGProgram, WatchHistory, AppSettings
 import os
 import sys
 import re
+import logging
+
+logger = logging.getLogger("IPTV.Database")
+
+try:
+    import iptv_core_rs
+    HAS_RUST_CORE = getattr(iptv_core_rs, "is_rust_core_active", lambda: False)()
+except ImportError:
+    HAS_RUST_CORE = False
 
 
 def _instantiate_dataclass(cls, d: dict):
     """Instancie une dataclass en ignorant automatiquement les champs inconnus (sécurité d'évolution du schéma)."""
     known_fields = {f.name for f in dataclasses.fields(cls)}
     return cls(**{k: v for k, v in d.items() if k in known_fields})
+
 
 
 def get_data_dir() -> Path:
@@ -466,7 +476,32 @@ class Database:
 
             conn.commit()
 
+    def refresh_search_index(self, force: bool = False):
+        """Met à jour l'index de recherche floue en mémoire (Rust) pour des recherches instantanées."""
+        if not HAS_RUST_CORE:
+            return
+        if not force and iptv_core_rs.is_search_index_ready():
+            return
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, playlist_id, COALESCE(name, ''), COALESCE(group_title, ''),
+                           COALESCE(tvg_name, ''), COALESCE(stream_type, 'live'),
+                           is_favorite, is_enabled
+                    FROM channels
+                """)
+                rows = cursor.fetchall()
+                raw_items = [
+                    (int(r[0]), int(r[1]), str(r[2]), str(r[3]), str(r[4]), str(r[5]), bool(r[6]), bool(r[7]))
+                    for r in rows
+                ]
+                iptv_core_rs.update_search_index(raw_items)
+        except Exception as e:
+            logger.warning(f"Erreur d'initialisation de l'index de recherche Rust: {e}")
+
     # ------------------ PLAYLISTS ------------------
+
 
     def add_playlist(self, p: Playlist) -> int:
         with self.get_connection() as conn:
@@ -835,6 +870,7 @@ class Database:
 
             cursor.execute("UPDATE playlists SET channel_count = (SELECT COUNT(*) FROM channels WHERE playlist_id=?) WHERE id=?", (playlist_id, playlist_id))
             conn.commit()
+            self.refresh_search_index(force=True)
 
     def get_channels(
         self,
@@ -848,6 +884,56 @@ class Database:
         limit: int = 50000,
         offset: int = 0
     ) -> List[Channel]:
+        GENERIC_GROUPS = (
+            "Tous les groupes", "Toutes les chaînes", "Tous les films",
+            "Toutes les séries", "Toutes les series",
+            "All channels", "All groups", "All movies", "All series"
+        )
+        if HAS_RUST_CORE and search_query and search_query.strip():
+            try:
+                if not iptv_core_rs.is_search_index_ready():
+                    self.refresh_search_index()
+                if iptv_core_rs.is_search_index_ready():
+                    # Appel Rust avec offset natif et limit
+                    matched_ids = iptv_core_rs.search_channel_ids(
+                        search_query.strip(),
+                        playlist_id=playlist_id,
+                        stream_type=stream_type if stream_type != "all" else None,
+                        group_title=group_title if group_title not in GENERIC_GROUPS else None,
+                        favorites_only=favorites_only,
+                        only_enabled=only_enabled,
+                        limit=limit,
+                        offset=offset
+                    )
+                    # Sécurité défensive anti-doublon si fallback
+                    if offset > 0 and len(matched_ids) > limit:
+                        matched_ids = matched_ids[offset:offset + limit]
+                    if not matched_ids:
+                        return []
+                    with self.get_connection() as conn:
+                        cursor = conn.cursor()
+                        rows_by_id = {}
+                        chunk_size = 900
+                        for i in range(0, len(matched_ids), chunk_size):
+                            chunk = matched_ids[i:i + chunk_size]
+                            placeholders = ",".join("?" * len(chunk))
+                            cursor.execute(f"SELECT * FROM channels WHERE id IN ({placeholders})", chunk)
+                            for r in cursor.fetchall():
+                                rows_by_id[r["id"]] = dict(r)
+
+                        channels = []
+                        for cid in matched_ids:
+                            if cid in rows_by_id:
+                                d = rows_by_id[cid]
+                                d["is_favorite"] = bool(d.get("is_favorite", 0))
+                                d["is_enabled"] = bool(d.get("is_enabled", 1))
+                                extra = d.get("extra_headers")
+                                d["extra_headers"] = json.loads(extra) if extra else {}
+                                channels.append(_instantiate_dataclass(Channel, d))
+                        return channels
+            except Exception as e:
+                logger.warning(f"Rust search fallback to SQLite: {e}")
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             conditions = []
@@ -925,7 +1011,29 @@ class Database:
         stream_type: Optional[str] = None,
         only_enabled: bool = True
     ) -> int:
-        """Retourne le nombre total d'éléments correspondant aux filtres pour la pagination."""
+        GENERIC_GROUPS = (
+            "Tous les groupes", "Toutes les chaînes", "Tous les films",
+            "Toutes les séries", "Toutes les series",
+            "All channels", "All groups", "All movies", "All series"
+        )
+        if HAS_RUST_CORE and search_query and search_query.strip():
+            try:
+                if not iptv_core_rs.is_search_index_ready():
+                    self.refresh_search_index()
+                if iptv_core_rs.is_search_index_ready():
+                    matched_ids = iptv_core_rs.search_channel_ids(
+                        search_query.strip(),
+                        playlist_id=playlist_id,
+                        stream_type=stream_type if stream_type != "all" else None,
+                        group_title=group_title if group_title not in GENERIC_GROUPS else None,
+                        favorites_only=favorites_only,
+                        only_enabled=only_enabled,
+                        limit=50000
+                    )
+                    return len(matched_ids)
+            except Exception as e:
+                logger.warning(f"Rust count fallback to SQLite: {e}")
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
             conditions = []
@@ -1481,6 +1589,23 @@ class Database:
             # Nettoyage des vieux programmes (> 24h)
             cursor.execute("DELETE FROM epg_programs WHERE end_time < datetime('now', '-1 day')")
             conn.commit()
+
+    def save_epg_batch_raw(self, raw_programs: List[tuple], clear_existing: bool = False):
+        """Insère directement un lot de tuples EPG pour des performances maximales."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if clear_existing:
+                cursor.execute("DELETE FROM epg_programs")
+
+            cursor.executemany("""
+                INSERT INTO epg_programs (tvg_id, title, description, start_time, end_time, category, icon_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, raw_programs)
+
+            # Nettoyage des vieux programmes (> 24h)
+            cursor.execute("DELETE FROM epg_programs WHERE end_time < datetime('now', '-1 day')")
+            conn.commit()
+
 
     def get_current_program(self, tvg_id: str) -> Optional[EPGProgram]:
         now_iso = datetime.now().isoformat()
@@ -2245,6 +2370,8 @@ class Database:
                 settings.introdb_outro_skip = data["introdb_outro_skip"].lower() == "true"
             if "app_language" in data:
                 settings.app_language = data["app_language"]
+            if "osd_hover_mode" in data:
+                settings.osd_hover_mode = data["osd_hover_mode"].lower() == "true"
             return settings
 
     def save_settings(self, settings: AppSettings):
@@ -2298,6 +2425,7 @@ class Database:
                 "introdb_intro_skip": str(settings.introdb_intro_skip),
                 "introdb_outro_skip": str(settings.introdb_outro_skip),
                 "app_language": settings.app_language,
+                "osd_hover_mode": str(settings.osd_hover_mode),
             }
             for k, v in data.items():
                 cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, v))

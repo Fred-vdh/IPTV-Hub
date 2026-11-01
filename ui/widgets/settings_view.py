@@ -281,6 +281,14 @@ class SettingsView(QWidget):
         r2.addWidget(self.osd_timeout_spin)
         c_layout.addLayout(r2)
 
+        # Mode survol OSD
+        self.osd_hover_cb = QCheckBox(" " + tr("Afficher l'OSD uniquement au survol de sa zone (masquage dès la sortie)"))
+        self.osd_hover_cb.setChecked(getattr(self.settings, "osd_hover_mode", True))
+        self.osd_hover_cb.setToolTip(tr("L'OSD ne s'affiche que lorsque la souris entre dans la zone des contrôles et disparaît dès qu'elle en sort."))
+        self.osd_hover_cb.toggled.connect(lambda checked: self.osd_timeout_spin.setEnabled(not checked))
+        self.osd_timeout_spin.setEnabled(not getattr(self.settings, "osd_hover_mode", True))
+        c_layout.addWidget(self.osd_hover_cb)
+
         # Reprise de la dernière chaîne
         self.auto_resume_cb = QCheckBox(" " + tr("Reprendre automatiquement la dernière chaîne au lancement"))
         self.auto_resume_cb.setChecked(True)
@@ -1055,6 +1063,11 @@ class SettingsView(QWidget):
         if hasattr(self, "introdb_outro_cb"):
             self.introdb_outro_cb.setChecked(getattr(self.settings, "introdb_outro_skip", True))
             self.introdb_outro_cb.setEnabled(self.auto_play_next_cb.isChecked())
+        if hasattr(self, "osd_hover_cb"):
+            hover_enabled = getattr(self.settings, "osd_hover_mode", True)
+            self.osd_hover_cb.setChecked(hover_enabled)
+            if hasattr(self, "osd_timeout_spin"):
+                self.osd_timeout_spin.setEnabled(not hover_enabled)
 
         # Auto-Sync & EPG
         if hasattr(self, "sync_live_cb"):
@@ -1142,6 +1155,8 @@ class SettingsView(QWidget):
             self.settings.introdb_intro_skip = self.introdb_intro_cb.isChecked()
         if hasattr(self, "introdb_outro_cb"):
             self.settings.introdb_outro_skip = self.introdb_outro_cb.isChecked()
+        if hasattr(self, "osd_hover_cb"):
+            self.settings.osd_hover_mode = self.osd_hover_cb.isChecked()
         self.settings.app_language = self.app_lang_combo.currentData() or "fr"
 
         # Auto-Sync & EPG
@@ -1265,6 +1280,9 @@ class SettingsView(QWidget):
             self.lbl_osd.setText(tr("Délai de masquage des contrôles vidéo :"))
         if hasattr(self, "osd_timeout_spin"):
             self.osd_timeout_spin.setSuffix(" " + tr("secondes"))
+        if hasattr(self, "osd_hover_cb"):
+            self.osd_hover_cb.setText(" " + tr("Afficher l'OSD uniquement au survol de sa zone (masquage dès la sortie)"))
+            self.osd_hover_cb.setToolTip(tr("L'OSD ne s'affiche que lorsque la souris entre dans la zone des contrôles et disparaît dès qu'elle en sort."))
         if hasattr(self, "auto_resume_cb"):
             self.auto_resume_cb.setText(" " + tr("Reprendre automatiquement la dernière chaîne au lancement"))
         if hasattr(self, "auto_play_next_cb"):

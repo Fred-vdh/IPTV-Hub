@@ -1454,6 +1454,12 @@ class SeriesDetailsView(QWidget):
 
         self.all_episodes_flat.sort(key=_ep_sort_key)
 
+        # Trier chaque saison individuellement par numéro d'épisode pour garantir un ordre séquentiel strict
+        for s_key in self.episodes_by_season:
+            self.episodes_by_season[s_key].sort(
+                key=lambda ep: int(ep.get("episode_num", 1)) if str(ep.get("episode_num", 1)).isdigit() else 999
+            )
+
         self._populate_season_tabs()
         self._update_resume_button_text()
 
@@ -1695,7 +1701,11 @@ class SeriesDetailsView(QWidget):
             else:
                 self.current_season = "1" if "1" in sorted_seasons else sorted_seasons[0]
 
-        if len(sorted_seasons) > 10:
+        if len(sorted_seasons) > 20:
+            combo_lbl = QLabel(tr("Saison :"))
+            combo_lbl.setStyleSheet("color: #94a3b8; font-size: 13px; font-weight: 700; margin-right: 4px;")
+            self.seasons_tabs_layout.addWidget(combo_lbl)
+
             combo = QComboBox()
             combo.setObjectName("seasonSelectorCombo")
             combo.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2318,7 +2328,11 @@ class SeriesDetailsView(QWidget):
         sorted_seasons = sorted(self.episodes_by_season.keys(), key=lambda x: int(x) if x.isdigit() else 999)
 
         for s in sorted_seasons:
-            for ep in self.episodes_by_season[s]:
+            eps = sorted(
+                self.episodes_by_season[s],
+                key=lambda ep: int(ep.get("episode_num", 1)) if str(ep.get("episode_num", 1)).isdigit() else 999
+            )
+            for ep in eps:
                 curr_ep_id = str(ep.get("id", ""))
                 curr_ext = str(ep.get("container_extension", "mp4")).strip(".") or "mp4"
                 curr_ep_num = ep.get("episode_num", 1)

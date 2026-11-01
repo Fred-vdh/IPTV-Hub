@@ -7,6 +7,7 @@ import json
 import re
 import ssl
 import logging
+import unicodedata
 import urllib.parse
 import urllib.request
 from typing import List, Dict, Any, Optional
@@ -84,10 +85,12 @@ def get_tmdb_language_code(preferred_audio_lang: str) -> str:
 def clean_search_title(raw_title: str) -> str:
     """Nettoie un titre pour maximiser la pertinence de recherche TMDB."""
     t = str(raw_title or "").strip()
-    # Supprimer les balises courantes [MULTI], 4K, FHD, VF, VOSTFR, etc.
-    t = re.sub(r"\[.*?\]|\(.*?\)", " ", t)
+    # Décomposition NFKD pour normaliser les exposants (ex: ᴴ²⁶⁵ -> H265) et ligatures
+    t = unicodedata.normalize("NFKD", t)
+    # Supprimer les balises courantes [MULTI], (2024), |FR|, etc.
+    t = re.sub(r"\[.*?\]|\(.*?\)|\|.*?\|", " ", t)
     t = re.sub(
-        r"\b(MULTI|TRUEFRENCH|FRENCH|VOSTFR|VOST|VF|VFF|VFQ|4K|UHD|HDR|1080P|720P|FHD|HD|HEVC|H265|X265|WEB-DL|BLURAY|DVDRIP)\b",
+        r"\b(MULTI|TRUEFRENCH|FRENCH|VOSTFR|VOST|VF|VFF|VFQ|VFI|4K|UHD|HDR|1080P|720P|FHD|HD|SD|HEVC|H265|X265|H264|X264|WEB-DL|BLURAY|DVDRIP)\b",
         " ",
         t,
         flags=re.IGNORECASE,
@@ -369,18 +372,28 @@ def get_person_details_and_credits(person_id: int, language: str = "fr-FR") -> D
 
 
 def normalize_title_for_matching(title: str) -> str:
-    """Normalise un titre de film ou série pour un matching insensible aux balises IPTV, ponctuation et casse."""
+    """Normalise un titre de film ou série pour un matching insensible aux balises IPTV, ponctuation, exposants et casse."""
     if not title:
         return ""
-    t = re.sub(r"\[.*?\]|\(.*?\)|\|.*?\|", " ", title)
+    # 1. Décomposition NFKD pour transformer les exposants (ex: ᴴ²⁶⁵ -> H265, ⁴ᴷ -> 4K), ligatures, etc.
+    t = unicodedata.normalize("NFKD", str(title))
+    # Supprimer les diacritiques/accents combinés pour un matching tolérant
+    t = "".join(c for c in t if not unicodedata.combining(c))
+
+    # 2. Supprimer les blocs entre crochets, parenthèses et barres verticales
+    t = re.sub(r"\[.*?\]|\(.*?\)|\|.*?\|", " ", t)
+
+    # 3. Supprimer les balises IPTV courantes
     t = re.sub(
-        r"\b(MULTI|TRUEFRENCH|FRENCH|VOSTFR|VOST|VF|VFF|VFQ|4K|UHD|HDR|1080P|720P|FHD|HD|HEVC|H265|X265|WEB-DL|BLURAY|DVDRIP|(?:SAISON|SEASON|S)\s*\d+(?:-S?\d+)?)\b",
+        r"\b(MULTI|TRUEFRENCH|FRENCH|VOSTFR|VOST|VF|VFF|VFQ|VFI|4K|UHD|HDR|1080P|720P|FHD|HD|SD|HEVC|H265|X265|H264|X264|AV1|AAC|AC3|DTS|ATMOS|DOLBY|BLURAY|DVDRIP|BDRIP|WEBRIP|WEB-DL|REPACK|EXTENDED|REMASTERED|UNCUT|DIRECTORS CUT|VERSION LONGUE|(?:SAISON|SEASON|S)\s*\d+(?:-S?\d+)?)\b",
         " ",
         t,
         flags=re.IGNORECASE,
     )
+    # Supprimer les années
     t = re.sub(r"\b(19\d{2}|20\d{2})\b", " ", t)
-    t = re.sub(r"[^\w\d]", "", t).lower()
+    # Ne garder que lettres et chiffres ASCII minuscules
+    t = re.sub(r"[^a-zA-Z0-9]", "", t).lower()
     return t.strip()
 
 
@@ -453,16 +466,19 @@ def match_artist_credits_with_library(
 
         candidates = target_dict.get(norm_fr, []) or target_dict.get(norm_orig, [])
         if not candidates:
-            # Recherche par préfixe uniquement pour les titres avec longueur significative et proche
+            # Recherche par préfixe ou sous-chaîne pour les titres longs
             for norm in (norm_fr, norm_orig):
                 if not norm or len(norm) < 6:
                     continue
                 for k, items in target_dict.items():
                     if len(k) < 6:
                         continue
-                    if (k.startswith(norm) or norm.startswith(k)) and abs(len(k) - len(norm)) <= 3:
-                        candidates = items
-                        break
+                    if k.startswith(norm) or norm.startswith(k):
+                        diff = abs(len(k) - len(norm))
+                        # Si la différence est petite (<= 6) OU si la partie commune représente au moins 75% du plus long
+                        if diff <= 6 or (min(len(k), len(norm)) / max(len(k), len(norm)) >= 0.75):
+                            candidates = items
+                            break
                 if candidates:
                     break
 

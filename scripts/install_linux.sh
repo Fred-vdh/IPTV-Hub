@@ -111,6 +111,11 @@ if [ "$HAS_LIBMPV" = false ]; then
     MISSING_PKGS+=("libmpv")
 fi
 
+# Vérification de libxcb-cursor (obligatoire pour le plugin Qt "xcb" depuis Qt 6.5)
+if ! ldconfig -p 2>/dev/null | grep -E "libxcb-cursor\.so" &>/dev/null; then
+    MISSING_PKGS+=("libxcb-cursor0")
+fi
+
 if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
     echo -e "${YELLOW}Certaines dépendances système sont recommandées : ${MISSING_PKGS[*]}${NC}"
     
@@ -119,13 +124,13 @@ if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
         PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "")
         EXTRA_VENV=""
         [ -n "$PY_VER" ] && EXTRA_VENV="python${PY_VER}-venv"
-        CMD_INSTALL="sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip $EXTRA_VENV libmpv-dev libmpv2 yt-dlp"
+        CMD_INSTALL="sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip $EXTRA_VENV libmpv-dev libmpv2 libxcb-cursor0 yt-dlp"
     elif command -v dnf &>/dev/null; then
-        CMD_INSTALL="sudo dnf install -y python3 python3-pip mpv-libs-devel yt-dlp"
+        CMD_INSTALL="sudo dnf install -y python3 python3-pip mpv-libs-devel xcb-util-cursor yt-dlp"
     elif command -v pacman &>/dev/null; then
-        CMD_INSTALL="sudo pacman -S --needed python python-pip mpv yt-dlp"
+        CMD_INSTALL="sudo pacman -S --needed python python-pip mpv xcb-util-cursor yt-dlp"
     elif command -v zypper &>/dev/null; then
-        CMD_INSTALL="sudo zypper install -y python3 python3-pip mpv-devel yt-dlp"
+        CMD_INSTALL="sudo zypper install -y python3 python3-pip mpv-devel libxcb-cursor0 yt-dlp"
     else
         CMD_INSTALL=""
     fi

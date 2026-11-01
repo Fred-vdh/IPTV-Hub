@@ -133,6 +133,12 @@ def main():
     # Définition de l'icône globale de l'application pour la barre des tâches Windows
     app.setWindowIcon(get_app_logo_icon())
 
+    # Affichage immédiat du Splash Screen (visuel instantané pour le démarrage à froid)
+    from ui.widgets.splash_screen import SplashScreen
+    splash = SplashScreen()
+    splash.show()
+    splash.set_status("Chargement des styles...", 15)
+
     # Application du thème sombre moderne (style IPTVnator)
     apply_theme(app)
 
@@ -140,13 +146,19 @@ def main():
     # QSvgRenderer.render() exécuté PENDANT un paintEvent corrompt la mémoire
     # (crash aléatoire au premier affichage de la grille VOD). On pré-rend donc
     # toutes les combinaisons icône × couleur ici, hors de tout paintEvent.
+    splash.set_status("Optimisation du cache graphique...", 45)
     prewarm_pixmap_cache()
 
     # Lancement de la fenêtre principale
+    splash.set_status("Initialisation de l'interface...", 75)
     window = MainWindow()
+
+    splash.set_status("Prêt !", 100)
     window.show()
+    splash.finish(window)
 
     sys.exit(app.exec())
+
 
 
 if __name__ == "__main__":

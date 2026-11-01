@@ -134,7 +134,10 @@ class _ExceptionPointers(ctypes.Structure):
     ]
 
 
-_VECTORED_HANDLER = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.POINTER(_ExceptionPointers))
+# ``WINFUNCTYPE`` n'existe que sous Windows. Ailleurs, le VEH n'est jamais
+# installé : ``CFUNCTYPE`` sert uniquement à ce que le module reste importable.
+_FUNCTYPE = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)
+_VECTORED_HANDLER = _FUNCTYPE(ctypes.c_long, ctypes.POINTER(_ExceptionPointers))
 
 # --------------------------------------------------------------------------- #
 # Localisation du module fautif

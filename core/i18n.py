@@ -2563,6 +2563,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "es": " Buscar \"{query}\" entre artistas",
         "de": " \"{query}\" unter Künstlern suchen",
     },
+    "Effacer la recherche": {
+        "fr": "Effacer la recherche",
+        "en": "Clear search",
+        "es": "Borrar búsqueda",
+        "de": "Suche löschen",
+    },
+    "Effacer la recherche / Tout afficher": {
+        "fr": "Effacer la recherche / Tout afficher",
+        "en": "Clear search / Show all",
+        "es": "Borrar búsqueda / Mostrar todo",
+        "de": "Suche löschen / Alles anzeigen",
+    },
     "Filmographie de l'artiste": {
         "fr": "Filmographie de l'artiste",
         "en": "Artist filmography",
@@ -2904,6 +2916,18 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "seconds",
         "es": "segundos",
         "de": "Sekunden",
+    },
+    "Afficher l'OSD uniquement au survol de sa zone (masquage dès la sortie)": {
+        "fr": "Afficher l'OSD uniquement au survol de sa zone (masquage dès la sortie)",
+        "en": "Show OSD only when hovering its area (hide immediately on leave)",
+        "es": "Mostrar OSD solo al pasar el ratón por su zona (ocultar al salir)",
+        "de": "OSD nur beim Überfahren der Steuerzone anzeigen (sofort ausblenden beim Verlassen)",
+    },
+    "L'OSD ne s'affiche que lorsque la souris entre dans la zone des contrôles et disparaît dès qu'elle en sort.": {
+        "fr": "L'OSD ne s'affiche que lorsque la souris entre dans la zone des contrôles et disparaît dès qu'elle en sort.",
+        "en": "The OSD only appears when mouse enters the control zone and disappears as soon as it leaves.",
+        "es": "El OSD solo aparece cuando el ratón entra en la zona de controles y desaparece al salir.",
+        "de": "Das OSD erscheint nur, wenn die Maus die Steuerzone betritt, und wird beim Verlassen sofort ausgeblendet.",
     },
     " Reprendre automatiquement la dernière chaîne au lancement": {
         "fr": " Reprendre automatiquement la dernière chaîne au lancement",

@@ -273,6 +273,114 @@ class TestAutoPlayNextEpisode(unittest.TestCase):
         prog_map_after = self.db.get_all_playback_progress_map()
         self.assertNotIn("http://test/series/user/pass/749996.mkv", prog_map_after)
 
+    def test_play_pause_while_playing_never_skips_episode(self):
+        """Vérifie que cliquer sur pause pendant la lecture ne saute JAMAIS d'épisode."""
+        from ui.main_window import MainWindow
+
+        win = MainWindow.__new__(MainWindow)
+        QMainWindow.__init__(win)
+        win.db = self.db
+        win.settings = AppSettings(auto_play_next_episode=True)
+        win.current_channel = Channel(id=10, name='John Doe S01E03', stream_type='series', stream_url='http://test/ep3.mp4', stream_id='489054')
+        win._series_episodes = [
+            Channel(id=10, name='Ep 3', stream_type='series', stream_url='http://test/ep3.mp4', stream_id='489054'),
+            Channel(id=11, name='Ep 4', stream_type='series', stream_url='http://test/ep4.mp4', stream_id='489055')
+        ]
+        win._current_series_idx = 0
+        # Même si _stopped_at_episode_end était resté accidentellement à True :
+        win._stopped_at_episode_end = True
+        win._play_next_series_episode = MagicMock()
+        win.player_controller = MagicMock()
+        win.player_controller.state = "playing"
+
+        MainWindow._on_play_pause_requested(win)
+
+        # Doit avoir basculé la pause et NE JAMAIS avoir appelé _play_next_series_episode
+        win.player_controller.toggle_pause.assert_called_once()
+        win._play_next_series_episode.assert_not_called()
+        self.assertFalse(win._stopped_at_episode_end)
+
+    def test_play_next_resynchronizes_with_current_channel(self):
+        """Vérifie que _play_next_series_episode se resynchronise avec current_channel si l'index est décalé."""
+        from ui.main_window import MainWindow
+
+        win = MainWindow.__new__(MainWindow)
+        QMainWindow.__init__(win)
+        win.db = self.db
+        win.settings = AppSettings(auto_play_next_episode=True)
+        # L'utilisateur regarde l'épisode 3 (stream_id 489054), mais l'index win._current_series_idx est resté à 0 (épisode 1)
+        win.current_channel = Channel(id=1, name='John Doe S01E03', stream_type='series', stream_url='http://test/ep3.mp4', stream_id='489054')
+        win._series_episodes = [
+            Channel(id=1, name='Ep 1', stream_type='series', stream_url='http://test/ep1.mp4', stream_id='489052'),
+            Channel(id=1, name='Ep 2', stream_type='series', stream_url='http://test/ep2.mp4', stream_id='489053'),
+            Channel(id=1, name='Ep 3', stream_type='series', stream_url='http://test/ep3.mp4', stream_id='489054'),
+            Channel(id=1, name='Ep 4', stream_type='series', stream_url='http://test/ep4.mp4', stream_id='489055'),
+        ]
+        win._current_series_idx = 0  # Décalé !
+        win._play_series_episode_in_details = MagicMock()
+        win._is_playing_series_in_details = True
+        win.player_controller = MagicMock()
+
+        success = MainWindow._play_next_series_episode(win)
+
+        self.assertTrue(success)
+        # L'index doit être corrigé à 3 (index de l'épisode 4) et non pas 1 (épisode 2) !
+        self.assertEqual(win._current_series_idx, 3)
+        win._play_series_episode_in_details.assert_called_once_with(win._series_episodes[3], start_pos=0.0)
+
+    def test_playback_finished_does_not_trigger_prematurely_at_88_percent(self):
+        """Vérifie qu'une coupure à 88% (ex: 2200s sur 2500s) ne termine pas l'épisode prématurément."""
+        from ui.main_window import MainWindow
+
+        win = MainWindow.__new__(MainWindow)
+        QMainWindow.__init__(win)
+        win.db = self.db
+        win.settings = AppSettings(auto_play_next_episode=True)
+        win.current_channel = Channel(id=1, name='John Doe S01E03', stream_type='series', stream_url='http://test/ep3.mp4', stream_id='489054')
+        win._current_playback_pos = 2200.0  # 88%
+        win._current_playback_dur = 2500.0  # reste 300s (5 minutes) !
+        win._current_outro_start_sec = None
+        win._save_current_playback_progress = MagicMock()
+        win._play_next_series_episode = MagicMock()
+
+        MainWindow._on_playback_finished(win)
+
+        win._save_current_playback_progress.assert_called_once()
+        win._play_next_series_episode.assert_not_called()
+        self.assertFalse(getattr(win, "_stopped_at_episode_end", False))
+
+    def test_movie_playback_play_pause_does_not_switch_to_channel_or_black_screen(self):
+        """Vérifie que la pause/reprise sur un film en fiche détaillée ne bascule jamais sur play_channel."""
+        from ui.main_window import MainWindow
+
+        win = MainWindow.__new__(MainWindow)
+        QMainWindow.__init__(win)
+        win.db = self.db
+        win.settings = AppSettings(auto_play_next_episode=True)
+        movie_ch = Channel(id=50, name="Spider-Man", stream_type="movie", stream_url="http://test/spiderman.mkv")
+        win.current_channel = movie_ch
+        win._is_playing_movie_in_details = True
+        # Simulation du cas critique : un épisode de série s'était terminé avant
+        win._stopped_at_episode_end = True
+
+        win.player_controller = MagicMock()
+        win.player_controller.state = "playing"
+        win.play_channel = MagicMock()
+
+        MainWindow._on_play_pause_requested(win)
+
+        # toggle_pause() doit avoir été appelé, play_channel() ne doit JAMAIS avoir été appelé
+        win.player_controller.toggle_pause.assert_called_once()
+        win.play_channel.assert_not_called()
+        self.assertFalse(win._stopped_at_episode_end)
+
+    def test_player_controller_state_property(self):
+        """Vérifie que PlayerController expose bien la propriété 'state'."""
+        from core.player_controller import PlayerController
+        pc = PlayerController.__new__(PlayerController)
+        pc._current_state = "paused"
+        self.assertEqual(pc.state, "paused")
+
 
 if __name__ == '__main__':
     unittest.main()
